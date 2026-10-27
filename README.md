@@ -1,6 +1,6 @@
 # Arlo Auto
 
-A private, single-member app for Arlozorov 97. Displays Fizikal's live schedule and saves weekly rules that target registration exactly 24 elapsed hours before each class.
+A personal, multi-account app for Arlozorov 97. Displays Fizikal's live schedule and saves weekly rules that target registration exactly 24 elapsed hours before each class.
 
 ## Run locally
 
@@ -11,7 +11,7 @@ cd arlo-auto
 node --env-file-if-exists=.env server.mjs
 ```
 
-Open http://127.0.0.1:3000. The default is **preview mode**: live schedule and persisted routines, with automatic weekly booking disabled. Explicit one-time registration and cancellation are available after connecting your account; their final buttons send real requests to Fizikal. Choose **Connect your account** and enter your existing Fizikal phone number/password. Credentials are encrypted locally, not stored in browser storage or source files.
+Open http://127.0.0.1:3000. The default is **preview mode**: live schedule and persisted routines, with automatic weekly booking disabled. Explicit one-time registration and cancellation are available after connecting your account; their final buttons send real requests to Fizikal. Sign in with your existing Fizikal phone number/password. Each person uses their own membership; no separate shared app password is needed. Credentials are encrypted locally, not stored in browser storage or source files.
 
 To enable actual registration, copy `.env.example` to `.env`, change `BOOKING_ENABLED=true`, and restart. Review your routines first. This enables the explicitly selected weekly registrations. To run reliably while the PC is off, deploy the same service to an always-on host later.
 
@@ -37,14 +37,13 @@ The Dockerfile runs the app with no package install. Use **one always-on replica
 | `HOST` | `0.0.0.0` |
 | `PORT` | Host's assigned port, default `3000` |
 | `DATA_DIR` | `/data` |
-| `ADMIN_PASSWORD` | A strong private app password, required outside loopback |
 | `ENCRYPTION_KEY` | Stable 32-byte random hex key, required outside loopback |
 | `COOKIE_SECURE` | `true`, behind HTTPS |
 | `BOOKING_ENABLED` | `true` when ready for live registration |
 
 Generate the key with `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`. Keep it stable across deployments. Losing/changing the key prevents decryption of saved credentials. A local development key is created at `data/local.key` when no environment key is configured; the entire data directory is ignored by Git. Set up credentials again in the deployed app instead of copying development secrets.
 
-Cloud authentication uses a separate app password and short-lived HttpOnly sessions. All writes enforce the same origin. `/health` is the unauthenticated health check. Do not expose the local loopback configuration through a tunnel.
+Each person authenticates with Fizikal. A persistent HttpOnly, SameSite=Strict phone cookie has a rolling 365-day expiration and is renewed on authenticated use. Only its SHA-256 hash is stored server-side; sessions survive restarts. All writes enforce the same origin. `/health` is the unauthenticated health check. Do not expose the local loopback configuration through a tunnel.
 
 Fizikal integration uses the endpoints and request schema served by the original club website. These are not a documented public API and can change. Calendar reads have been verified against the live service; member login and the upcoming-bookings read have been verified with the connected account. Real registration/cancellation mutations have not been exercised without a chosen test class. No actual booking was sent during development.
 
@@ -67,3 +66,11 @@ Register opens a choice between Just this class (immediate, subject to club avai
 ## Schedule performance
 
 The schedule loads only the selected day. Loaded days are retained in the browser, and successful snapshots persist on the server. Saved snapshots render immediately; snapshots older than 30 seconds refresh in the background and are labelled saved. Refresh explicitly requests an updated day, retaining the previous snapshot if the club times out. Background schedule scans use at most three daily requests concurrently. Calendar responses are shared and reused for 15 seconds in the club adapter; booking and cancellation invalidate that cache. Mutation confirmation reads the member bookings endpoint instead of refetching the full schedule.
+
+## Personal accounts and persistent phones
+
+All API routes require a personal Fizikal sign-in, including on localhost. Each verified club member gets a separate database under `data/accounts/<random-id>/`, their own encrypted credentials, schedule cache, bookings, weekly rules, and worker. The root database contains the account directory and hashed persistent-device sessions. Preserve the whole data volume and encryption key when deploying. There is no shared ADMIN_PASSWORD.
+
+Sign out / Switch account revokes only this phone session; weekly routines continue. Disconnect all phones revokes every session for that account, removes its stored Fizikal credentials, and pauses its routines. Another member’s data is untouched. A year of inactivity, explicit logout, browser storage removal, or a new authentication requirement can require sign-in again. This is persistent sign-in, not a promise of permanent access.
+
+Legacy single-account rules and attempts remain intact and migrate only after that same Fizikal membership signs in successfully. The prior development browser session cannot automatically select the owner’s account; sign in once in the updated app.

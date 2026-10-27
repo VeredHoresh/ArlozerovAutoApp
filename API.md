@@ -1,19 +1,20 @@
 # Arlo Auto API and phone app
 
-The Node service hosts a private JSON API, a phone-installable progressive web app, and the always-on scheduling worker. The PWA calls `/api/` on its own HTTPS origin. Credentials and scheduled work remain on the server; the phone is only the interface.
+The Node service hosts an authenticated, per-member JSON API, a phone-installable progressive web app, and the always-on scheduling worker. The PWA calls `/api/` on its own HTTPS origin. Credentials and scheduled work remain on the server; the phone is only the interface.
 
 ## Authentication
 
-Cloud startup requires `ADMIN_PASSWORD` and a stable `ENCRYPTION_KEY`. Sign in with `POST /api/auth` and a JSON `{ "password": "…" }` body. The response sets a 12-hour HttpOnly, SameSite=Strict cookie; API clients should include cookies. Production requires HTTPS and `COOKIE_SECURE=true`. Browser writes require an Origin matching the app's host. This app is for one private member, not a public multi-user service.
+Cloud startup requires a stable ENCRYPTION_KEY and COOKIE_SECURE=true behind HTTPS. POST /api/auth with JSON {phone,password} verifies the caller’s own Fizikal membership and creates a persistent phone session. There is no shared app password. The response sets a rolling 365-day HttpOnly, SameSite=Strict cookie; only the token hash is stored in SQLite. Sessions survive backend restarts and renew on authenticated requests. All private API reads and writes use the account resolved from that cookie, never an account ID supplied by a caller.
 
-Fizikal login is separate: `POST /api/account` with phone/password connects the club account and saves encrypted credentials server-side. `DELETE /api/account` disconnects and pauses weekly rules. Never put these credentials into app source, the PWA manifest, URLs, or service-worker caches.
+POST /api/logout revokes the current phone session and leaves background routines active. DELETE /api/account removes encrypted club credentials, pauses that person’s rules and revokes all their phones. POST /api/account can update credentials only for the already signed-in membership; switching people requires sign-out and a fresh sign-in. Every person has a separate SQLite database and worker. API responses are never cached by the service worker.
 
 ## Routes
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Public deployment health check |
-| POST | `/api/auth` | Authenticate to the private app |
+| POST | `/api/auth` | Sign in using personal Fizikal phone/password |
+| POST | `/api/logout` | Sign out this phone only |
 | GET | `/api/state` | Account connection, weekly rules, queued attempts, sync status |
 | GET | `/api/calendar?start=YYYY-MM-DD&days=1` | Lazy-loaded selected day; `refresh=1` requests an update |
 | GET | `/api/bookings` | Member bookings and waitlist places for the next 60 days |
@@ -27,7 +28,7 @@ Responses are JSON. Errors have an `error` string and a non-2xx HTTP status. Mut
 
 ## Cloud deployment
 
-Use the included Dockerfile and railway.json, one replica, an always-on instance, and a persistent volume mounted at `/data`. Set `HOST=0.0.0.0`, `DATA_DIR=/data`, `ADMIN_PASSWORD`, `ENCRYPTION_KEY`, `COOKIE_SECURE=true`, and `BOOKING_ENABLED=true` when enabling weekly routines. Let the host set `PORT`. Keep the encryption key and volume across deployments. Connect the Fizikal account through the deployed HTTPS app; local development secrets are excluded from the image.
+Use the included Dockerfile and railway.json, one replica, an always-on instance, and a persistent volume mounted at `/data`. Set `HOST=0.0.0.0`, `DATA_DIR=/data`, `ENCRYPTION_KEY`, `COOKIE_SECURE=true`, and `BOOKING_ENABLED=true` when enabling weekly routines. Let the host set `PORT`. Keep the encryption key and volume across deployments. Connect the Fizikal account through the deployed HTTPS app; local development secrets are excluded from the image.
 
 Do not enable service sleeping: phone activity is not the clock for booking jobs. The worker must run while the app is closed. Monitor `/health` and the in-app booking activity. Restart recovery reconciles in-flight jobs with the club before another mutation.
 

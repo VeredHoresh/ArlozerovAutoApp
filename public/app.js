@@ -10,14 +10,28 @@ let selectedDate = today, classes = [], state = { rules: [], jobs: [] }, selecte
 let upcoming = [], cancellingClass;
 let calendarLoading = false, calendarError = '', loadedWeek = null;
 const loadedDays = new Map();
+let accountGeneration = 0;
+function clearAccountData() {
+  accountGeneration++; calendarRequest++; classes = []; upcoming = []; loadedDays.clear();
+  state = { rules: [], jobs: [], connected: false }; calendarLoading = false; calendarError = ''; loadedWeek = null;
+  $('#classes').replaceChildren(el('div', 'empty', 'Sign in to see your classes.'));
+  $('#bookings-list').replaceChildren(); $('#rules-list').replaceChildren(); $('#jobs-list').replaceChildren();
+  $('#class-count').textContent = '—'; $('#active-count').textContent = '0'; $('#rule-count').textContent = '0';
+  $('#member-label').textContent = 'Sign in with Fizikal'; $('#account-label').textContent = 'Your private account';
+  $('#mode-banner').textContent = 'Sign in with your own Fizikal account to manage your classes.';
+  $('#error').hidden = true;
+  for (const d of document.querySelectorAll('dialog[open]')) if (d.id !== 'auth-dialog') d.close();
+}
 function el(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
 function toast(message) { $('#toast').textContent = message; $('#toast').hidden = false; setTimeout(() => { $('#toast').hidden = true; }, 4500); }
 function error(message) { $('#error').textContent = message || ''; $('#error').hidden = !message; }
 async function api(path, options = {}) {
-  const res = await fetch('/api/' + path, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers } });
+  const generation = accountGeneration;
+  const res = await fetch('/api/' + path, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...(state.accountId ? { 'X-Arlo-Account': state.accountId } : {}), ...options.headers } });
   const data = await res.json();
+  if (generation !== accountGeneration) throw new Error('Your account changed. Please try again.');
   if (!res.ok) {
-    if (res.status === 401 && path !== 'auth' && !$('#auth-dialog').open) $('#auth-dialog').showModal();
+    if ((res.status === 401 && path !== 'auth') || data.code === 'ACCOUNT_CHANGED') { clearAccountData(); if (!$('#auth-dialog').open) $('#auth-dialog').showModal(); }
     throw new Error(data.error || 'Request failed');
   }
   return data;
@@ -229,11 +243,15 @@ $('#account-form').onsubmit = async event => {
   finally { button.disabled = false; }
 };
 $('#disconnect').onclick = async () => {
-  try { await api('account', { method: 'DELETE' }); $('#account-dialog').close(); await refreshState(); toast('Account disconnected and routines paused'); } catch (e) { $('#account-error').textContent = e.message; }
+  try { await api('account', { method: 'DELETE' }); clearAccountData(); $('#auth-dialog').showModal(); toast('Account disconnected on all phones and routines paused'); } catch (e) { $('#account-error').textContent = e.message; }
+};
+$('#signout').onclick = async () => {
+  try { await api('logout', { method: 'POST' }); clearAccountData(); $('#auth-form').reset(); $('#auth-error').textContent = ''; $('#auth-dialog').showModal(); toast('Signed out on this phone. Your weekly routines continue.'); }
+  catch (e) { $('#account-error').textContent = e.message; }
 };
 $('#auth-form').onsubmit = async event => {
   event.preventDefault(); const button = event.submitter; button.disabled = true;
-  try { await api('auth', { method: 'POST', body: JSON.stringify({ password: new FormData(event.target).get('password') }) }); event.target.reset(); $('#auth-dialog').close(); await initialize(); }
+  try { const fields = new FormData(event.target); await api('auth', { method: 'POST', body: JSON.stringify({ phone: fields.get('phone'), password: fields.get('password') }) }); event.target.reset(); clearAccountData(); $('#auth-dialog').close(); await initialize(); toast('Signed in. This phone will stay connected.'); }
   catch (e) { $('#auth-error').textContent = e.message; } finally { button.disabled = false; }
 };
 $('#auth-dialog').addEventListener('cancel', event => event.preventDefault());

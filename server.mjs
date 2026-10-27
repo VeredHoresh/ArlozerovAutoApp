@@ -2,64 +2,24 @@ import http from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { randomBytes, randomUUID, timingSafeEqual, createHash } from 'node:crypto';
-import { openStore } from './store.mjs';
+import { randomUUID } from 'node:crypto';
+import { Accounts, sessionCookie } from './accounts.mjs';
 import { Fizikal } from './fizikal.mjs';
-import { Scheduler } from './scheduler.mjs';
 import { israelDate, shiftDate } from './time.mjs';
 import { singleBooking, cancelBooking } from './bookings.mjs';
 const root = dirname(fileURLToPath(import.meta.url));
-const host = process.env.HOST || '127.0.0.1', port = Number(process.env.PORT || 3000);
-const adminPassword = process.env.ADMIN_PASSWORD || '';
-if (host !== '127.0.0.1' && (!adminPassword || !process.env.ENCRYPTION_KEY)) throw new Error('Cloud mode requires ADMIN_PASSWORD and ENCRYPTION_KEY');
-const store = openStore(resolve(process.env.DATA_DIR || './data'), process.env.ENCRYPTION_KEY);
-const client = new Fizikal();
-const scheduler = new Scheduler(store, client, { live: process.env.BOOKING_ENABLED === 'true' });
-const sessions = new Map(), failures = new Map();
-const bookingLocks = new Set();
-const calendarLoads = new Map();
-async function schedule(start, days = 7, force = false) {
-  const key = 'calendar:' + (client.session?.userId || 'guest') + ':' + start + ':' + days;
-  const cached = store.get(key);
-  const saved = cached ? JSON.parse(cached) : null;
-  const refresh = () => {
-    if (!calendarLoads.has(key)) calendarLoads.set(key, client.calendar(start, shiftDate(start, days - 1)).then(classes => {
-      const result = { classes: classes.map(publicClass), fetchedAt: Date.now() };
-      store.set(key, JSON.stringify(result)); return result;
-    }).finally(() => calendarLoads.delete(key)));
-    return calendarLoads.get(key);
-  };
-  // Serve the saved week immediately. Refresh in the background so a slow club never blanks the schedule.
-  if (saved && !force) {
-    if (Date.now() - saved.fetchedAt > 30000) refresh().catch(() => {});
-    return { ...saved, stale: Date.now() - saved.fetchedAt > 30000 };
-  }
-  try { return await refresh(); }
-  catch (e) { if (saved) return { ...saved, stale: true }; throw e; }
-}
-scheduler.blockedKeys = bookingLocks;
-let reconnecting;
-client.reauthenticate = async () => {
-  if (!reconnecting) reconnecting = scheduler.connect().finally(() => { reconnecting = null; });
-  return reconnecting;
-};
-async function memberReady() {
-  if (!client.session && !(await scheduler.connect())) throw new Error('Connect your club account first');
-}
 function send(res, code, data) { res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' }); res.end(JSON.stringify(data)); }
 async function body(req) {
   if (!String(req.headers['content-type']).startsWith('application/json')) throw new Error('JSON required');
   let value = ''; for await (const chunk of req) { value += chunk; if (value.length > 8192) throw new Error('Request too large'); }
   return JSON.parse(value || '{}');
 }
-function authorized(req) {
-  if (!adminPassword) return true; // Bound to loopback only; checked at startup.
-  const sid = req.headers.cookie?.match(/(?:^|; )arlo_session=([^;]+)/)?.[1];
-  return sid && (sessions.get(sid) || 0) > Date.now();
-}
 function publicClass(a) { const { raw, ...rest } = a; return rest; }
 const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/install.js': ['install.js', 'text/javascript'], '/sw.js': ['sw.js', 'text/javascript'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/offline.html': ['offline.html', 'text/html'], ...Object.fromEntries(['icon-192.png','icon-512.png','icon-maskable.png','apple-touch-icon.png'].map(name => ['/' + name, [name, 'image/png']])) };
-const server = http.createServer(async (req, res) => {
+export function createApplication(accounts, { secure = false } = {}) {
+const failures = new Map();
+const getToken = req => req.headers.cookie?.match(/(?:^|; )arlo_session=([^;]+)/)?.[1];
+return http.createServer(async (req, res) => {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('X-Content-Type-Options', 'nosniff');
   res.setHeader('Referrer-Policy', 'no-referrer');
@@ -76,17 +36,28 @@ const server = http.createServer(async (req, res) => {
       const address = req.socket.remoteAddress;
       const prior = failures.get(address);
       if (prior?.count >= 8 && prior.until > Date.now()) return send(res, 429, { error: 'Too many attempts. Try again in 15 minutes.' });
-      const { password } = await body(req);
-      const hash = v => createHash('sha256').update(String(v || '')).digest();
-      if (adminPassword && !timingSafeEqual(hash(password), hash(adminPassword))) {
-        failures.set(address, { count: prior?.until > Date.now() ? prior.count + 1 : 1, until: Date.now() + 900000 });
-        return send(res, 401, { error: 'Incorrect app password' });
-      }
-      const token = randomBytes(32).toString('hex'); sessions.set(token, Date.now() + 12 * 3600000);
-      res.setHeader('Set-Cookie', `arlo_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200${process.env.COOKIE_SECURE === 'true' ? '; Secure' : ''}`);
-      failures.delete(address); return send(res, 200, { ok: true });
+      const { phone, password } = await body(req);
+      if (typeof phone !== 'string' || !/^[+\d -]{8,20}$/.test(phone) || typeof password !== 'string' || !password || password.length > 500) return send(res, 400, { error: 'Enter your Fizikal phone number and password' });
+      failures.set(address, { count: prior?.until > Date.now() ? prior.count + 1 : 1, until: Date.now() + 900000 });
+      try {
+        const context = await accounts.login(phone.trim(), password);
+        const oldToken = getToken(req); if (oldToken) accounts.logout(oldToken);
+        const token = accounts.issue(context.account.id);
+        res.setHeader('Set-Cookie', sessionCookie(token, secure));
+        failures.delete(address);
+        return send(res, 200, { ok: true, name: context.account.name });
+      } catch { return send(res, 401, { error: 'Fizikal sign-in failed. Check your details or try again shortly.' }); }
     }
-    if (!authorized(req)) return send(res, 401, { error: 'Sign in to your app' });
+    const token = getToken(req);
+    const context = accounts.authenticate(token);
+    if (!context) return send(res, 401, { error: 'Sign in with your Fizikal account' });
+    if (req.headers['x-arlo-account'] && req.headers['x-arlo-account'] !== context.account.id) return send(res, 409, { error: 'The signed-in account changed. Please sign in again.', code: 'ACCOUNT_CHANGED' });
+    res.setHeader('Set-Cookie', sessionCookie(token, secure));
+    const { store, client, scheduler, bookingLocks, schedule, memberReady } = context;
+    if (url.pathname === '/api/logout' && req.method === 'POST') {
+      accounts.logout(token); res.setHeader('Set-Cookie', sessionCookie('', secure));
+      return send(res, 200, { ok: true });
+    }
     if (url.pathname === '/api/bookings' && req.method === 'GET') {
       await memberReady();
       const start = israelDate();
@@ -116,7 +87,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (url.pathname === '/api/state' && req.method === 'GET') {
       return send(res, 200, {
-        connected: !!store.get('credentials'), member: client.session?.name || null,
+        connected: !!store.get('credentials'), member: context.account.name, accountId: context.account.id,
         live: scheduler.live, lastSync: scheduler.lastSync || null, syncError: scheduler.syncError,
         timezone: 'Asia/Jerusalem', rules: store.rules(),
         jobs: store.db.prepare('SELECT key,ruleId,dueAt,startsAt,status,attempts,updatedAt,message,data FROM jobs ORDER BY dueAt DESC LIMIT 150').all().map(j => ({ ...j, data: publicClass(JSON.parse(j.data)) }))
@@ -131,7 +102,10 @@ const server = http.createServer(async (req, res) => {
     if (url.pathname === '/api/account' && req.method === 'POST') {
       const { phone, password } = await body(req);
       if (typeof phone !== 'string' || !/^[+\d -]{8,20}$/.test(phone) || typeof password !== 'string' || !password) return send(res, 400, { error: 'Enter your club phone number and password' });
-      const info = await client.login(phone.trim(), password);
+      const verified = new Fizikal();
+      const info = await verified.login(phone.trim(), password);
+      if (`230:23:${verified.session.userId}` !== context.account.memberKey) return send(res, 409, { error: 'Sign out before switching to another Fizikal account' });
+      client.session = verified.session; client.dayCache.clear();
       store.set('credentials', store.encrypt({ phone: phone.trim(), password }));
       scheduler.lastSync = 0;
       return send(res, 200, { ok: true, ...info });
@@ -140,6 +114,7 @@ const server = http.createServer(async (req, res) => {
       store.db.prepare("DELETE FROM settings WHERE key='credentials'").run(); client.session = null;
       for (const rule of store.rules()) { rule.enabled = false; store.db.prepare('UPDATE rules SET data=? WHERE id=?').run(JSON.stringify(rule), rule.id); }
       store.db.prepare("UPDATE jobs SET status='cancelled',message='Account disconnected' WHERE status IN ('pending','retry')").run();
+      accounts.revokeAll(context.account.id); res.setHeader('Set-Cookie', sessionCookie('', secure));
       return send(res, 200, { ok: true });
     }
     if (url.pathname === '/api/rules' && req.method === 'POST') {
@@ -174,9 +149,14 @@ const server = http.createServer(async (req, res) => {
     return send(res, 404, { error: 'Not found' });
   } catch (e) { send(res, 400, { error: String(e.message).slice(0, 250) }); }
 });
-server.listen(port, host, async () => {
-  console.log(`Arlo Auto: http://${host}:${port} · ${scheduler.live ? 'LIVE BOOKING' : 'Preview mode — booking disabled'}`);
-  try { await scheduler.connect(); } catch { scheduler.syncError = 'Club account needs reconnection'; }
-  scheduler.start();
-});
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { scheduler.stop(); server.close(() => { store.db.close(); process.exit(0); }); });
+}
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const host = process.env.HOST || '127.0.0.1', port = Number(process.env.PORT || 3000);
+  const secure = process.env.COOKIE_SECURE === 'true';
+  if (host !== '127.0.0.1' && (!process.env.ENCRYPTION_KEY || !secure)) throw new Error('Cloud mode requires ENCRYPTION_KEY and COOKIE_SECURE=true');
+  const accounts = new Accounts(resolve(process.env.DATA_DIR || './data'), process.env.ENCRYPTION_KEY, { live: process.env.BOOKING_ENABLED === 'true' });
+  accounts.start();
+  const server = createApplication(accounts, { secure });
+  server.listen(port, host, () => console.log(`Arlo Auto: http://${host}:${port} · Personal Fizikal accounts · Automatic booking ${process.env.BOOKING_ENABLED === 'true' ? 'enabled' : 'paused'}`));
+  for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => server.close(() => { accounts.close(); process.exit(0); }));
+}
