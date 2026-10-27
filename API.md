@@ -19,6 +19,8 @@ POST /api/logout revokes the current phone session and leaves background routine
 | GET | `/api/calendar?start=YYYY-MM-DD&days=1` | Lazy-loaded selected day; `refresh=1` requests an update |
 | GET | `/api/bookings` | Member bookings and waitlist places for the next 60 days |
 | POST | `/api/bookings/register` | One occurrence: `{key,date,waitlist}` |
+| POST | `/api/bookings/schedule` | Schedule one future occurrence at its club opening time: `{key,date,waitlist}` |
+| POST | `/api/bookings/unschedule` | Cancel a pending one-time request: `{key,date}`; does not cancel a club booking |
 | POST | `/api/bookings/cancel` | Cancel and exclude one occurrence: `{key,date}` |
 | POST | `/api/rules` | Create weekly rule: `{key,start,waitlist,pinInstructor}` |
 | PATCH | `/api/rules/:id` | Change `enabled`, `waitlist`, or `pinInstructor` |
@@ -40,3 +42,9 @@ Use the deployed HTTPS URL, not the PC's localhost address. The app includes a m
 - Android: open in Chrome, then Install app / Add to Home screen, or use the app's install button when available.
 
 Installation and deployed-phone testing require a live cloud URL. No app-store package is needed.
+
+## One-time registration when booking opens
+
+For a class whose status is not open yet, the app can save a one-time registration request in that member’s persistent jobs database. It uses the club’s `TimeBeforeRegistration` interval; if absent, the app clearly labels the fallback of 24 elapsed hours as estimated. These explicitly authorized one-time requests execute even when `BOOKING_ENABLED=false`; that flag continues to pause weekly automation. No weekly rule is created. Requests survive restarts and can be cancelled in My bookings before execution. Disconnecting the account cancels pending requests.
+
+The worker checks current club state at opening without using the calendar cache, respects the chosen waitlist preference, and confirms the result with a fresh read. Uncertain responses are reconciled before another mutation. Late recovery beyond two minutes is recorded as missed. Server scheduling and network delays mean no exact arrival time or place is guaranteed.

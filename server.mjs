@@ -64,6 +64,19 @@ return http.createServer(async (req, res) => {
       const classes = await client.upcoming(start, shiftDate(start, 60));
       return send(res, 200, { classes: classes.map(publicClass), fetchedAt: Date.now(), through: shiftDate(start, 60) });
     }
+    if (['/api/bookings/schedule', '/api/bookings/unschedule'].includes(url.pathname) && req.method === 'POST') {
+      const { key, date, waitlist = false } = await body(req);
+      if (typeof key !== 'string' || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || typeof waitlist !== 'boolean') return send(res, 400, { error: 'Choose a class from the schedule' });
+      if (bookingLocks.has(key)) return send(res, 409, { error: 'An operation for this class is already running. Refresh shortly.' });
+      if (url.pathname.endsWith('/unschedule')) { scheduler.cancelScheduled(key); return send(res, 200, { ok: true }); }
+      bookingLocks.add(key);
+      try {
+        await memberReady(); client.dayCache?.clear();
+        const a = (await client.calendar(date, date)).find(a => a.key === key);
+        if (!a) return send(res, 409, { error: 'Class changed. Refresh the schedule.' });
+        return send(res, 201, { scheduled: true, ...scheduler.scheduleOnce(a, waitlist) });
+      } finally { bookingLocks.delete(key); }
+    }
     if (['/api/bookings/register', '/api/bookings/cancel'].includes(url.pathname) && req.method === 'POST') {
       const { key, date, waitlist = false } = await body(req);
       if (typeof key !== 'string' || typeof date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(date) || typeof waitlist !== 'boolean') return send(res, 400, { error: 'Choose a class from the schedule' });

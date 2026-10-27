@@ -73,3 +73,5 @@ html[dir=rtl] .offline-page{margin:10vh auto}
  .section-note{padding:0 12px;margin-bottom:12px}
 }
 @media(max-width:1000px){.week-picker #prev-week{grid-column:1;grid-row:1}.week-picker #today{grid-column:2;grid-row:1}.week-picker #next-week{grid-column:3;grid-row:1}}
+
+.booking-submit{position:sticky;bottom:-22px;background:#fff;padding:10px 0 4px;border-top:1px solid var(--line);margin-top:12px}.booking-submit .full{margin-top:0}

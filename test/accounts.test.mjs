@@ -84,3 +84,24 @@ test('legacy rules migrate only to the verified original member',async t=>{
   const a=await accounts.login('0500000001','test-password');assert.equal(a.store.rules()[0].id,'old-rule');
   assert.equal(b.store.rules().length,0);assert.equal(accounts.root.get('credentials'),undefined);
 });
+
+test('scheduled registration API stores only the signed-in member request and supports cancellation', async t => {
+  const dir=mkdtempSync(join(tmpdir(),'arlo-scheduled-http-')), f=fixture();
+  const accounts=new Accounts(dir,undefined,{...f,workers:false,live:false});const server=createApplication(accounts);
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(async()=>{await new Promise(resolve=>server.close(resolve));accounts.close();rmSync(dir,{recursive:true});});
+  const origin=`http://127.0.0.1:${server.address().port}`;
+  const a=await accounts.login('0500000001','test-password'), b=await accounts.login('0500000002','test-password');
+  f.members.get(1).status=6;f.members.get(2).status=6;
+  const token=accounts.issue(a.account.id), otherToken=accounts.issue(b.account.id);
+  const c=(await a.client.calendar())[0];const payload={key:c.key,date:c.date,waitlist:true};
+  const post=async (path,token,data=payload)=>{const r=await fetch(origin+'/api/bookings/'+path,{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',...(token?{Cookie:`arlo_session=${token}`}:{})},body:JSON.stringify(data)});return {status:r.status,data:await r.json()};};
+  assert.equal((await post('schedule',null)).status,401);
+  const scheduled=await post('schedule',token);assert.equal(scheduled.status,201);assert.equal(scheduled.data.scheduled,true);
+  assert.equal(a.store.db.prepare('SELECT ruleId FROM jobs').get().ruleId,'one-time');
+  assert.equal(b.store.db.prepare('SELECT COUNT(*) AS n FROM jobs').get().n,0);
+  assert.equal((await post('unschedule',otherToken)).status,400);
+  assert.equal(a.store.db.prepare('SELECT status FROM jobs').get().status,'pending');
+  assert.equal((await post('unschedule',token)).status,200);
+  assert.equal(a.store.db.prepare('SELECT status FROM jobs').get().status,'cancelled');assert.equal(f.members.get(1).writes,0);
+});

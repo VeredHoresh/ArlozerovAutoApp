@@ -1,4 +1,4 @@
-import { israelDate, shiftDate, matches } from './time.mjs';
+import { israelDate, shiftDate, matches, registrationOpening } from './time.mjs';
 export const FINAL = new Set(['registered', 'waitlisted', 'failed', 'missed', 'cancelled']);
 export class Scheduler {
   constructor(store, client, { live = false, now = () => Date.now() } = {}) {
@@ -12,12 +12,29 @@ export class Scheduler {
     await this.client.login(phone, password);
     return true;
   }
+  scheduleOnce(a, waitlist = false) {
+    const { opensAt, openingEstimated } = registrationOpening(a.startsAt, a.clubWindow);
+    if (a.status !== 6 || a.paid || a.seatsMap || a.raw?.RequireReserve || a.raw?.HasCourt || opensAt <= this.now() || opensAt >= a.startsAt) throw new Error('לא ניתן לתזמן הרשמה למפגש הזה. יש לעדכן את לוח החוגים.');
+    const prior = this.store.db.prepare('SELECT status FROM jobs WHERE key=?').get(a.key);
+    if (prior && ['running', 'registered', 'waitlisted'].includes(prior.status)) throw new Error('כבר קיימת הרשמה או שמתבצע ניסיון הרשמה למפגש הזה.');
+    const data = { ...a, opensAt, openingEstimated, scheduledWaitlist: waitlist };
+    this.store.db.prepare(`INSERT INTO jobs(key,ruleId,dueAt,startsAt,status,nextAt,updatedAt,message,data) VALUES (?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(key) DO UPDATE SET ruleId=excluded.ruleId,dueAt=excluded.dueAt,startsAt=excluded.startsAt,status='pending',attempts=0,nextAt=excluded.nextAt,updatedAt=excluded.updatedAt,message=excluded.message,data=excluded.data`)
+      .run(a.key, 'one-time', opensAt, a.startsAt, 'pending', opensAt, this.now(), 'נשמר ניסיון הרשמה חד־פעמי למועד פתיחת ההרשמה.', JSON.stringify(data));
+    if (this.timer) this.arm();
+    return { opensAt, openingEstimated };
+  }
+  cancelScheduled(key) {
+    const job = this.store.db.prepare('SELECT * FROM jobs WHERE key=? AND ruleId=?').get(key, 'one-time');
+    if (!job || !['pending', 'retry'].includes(job.status)) throw new Error('לא ניתן לבטל את התזמון כעת. יש לעדכן את ההרשמות ולבדוק את מצב המפגש.');
+    this.finish(key, 'cancelled', 'ניסיון ההרשמה העתידי בוטל לבקשתך.');
+  }
   async sync() {
     const start = israelDate(this.now());
     let rules = this.store.rules().filter(r => r.enabled);
     const db = this.store.db;
     if (!rules.length) {
-      db.prepare("UPDATE jobs SET status='cancelled',message='No active weekly rules' WHERE status IN ('pending','retry')").run();
+      db.prepare("UPDATE jobs SET status='cancelled',message='No active weekly rules' WHERE ruleId != 'one-time' AND status IN ('pending','retry')").run();
       this.lastSync = this.now(); this.syncError = null;
       return [];
     }
@@ -35,12 +52,13 @@ export class Scheduler {
       // A newly enabled rule never causes a surprise immediate, late booking.
       if (!job && a.dueAt < this.now()) continue;
       db.prepare(`INSERT INTO jobs(key,ruleId,dueAt,startsAt,status,nextAt,updatedAt,data) VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(key) DO UPDATE SET data=excluded.data, ruleId=excluded.ruleId WHERE jobs.status='pending'`)
+        ON CONFLICT(key) DO UPDATE SET data=excluded.data, ruleId=excluded.ruleId WHERE jobs.status='pending' AND jobs.ruleId != 'one-time'`)
         .run(a.key, rule.id, a.dueAt, a.startsAt, 'pending', a.dueAt, this.now(), JSON.stringify(a));
     }
     // Only cancel missing occurrences inside the fetched range. Future records survive range boundaries.
     const keys = new Set(classes.map(a => a.key));
     for (const job of db.prepare("SELECT * FROM jobs WHERE status IN ('pending','retry')").all()) {
+      if (job.ruleId === 'one-time') continue;
       const a = JSON.parse(job.data);
       if (!rules.some(r => r.id === job.ruleId && matches(r, a)) || (a.date >= start && a.date <= shiftDate(start, 13) && !keys.has(a.key))) this.finish(job.key, 'cancelled', 'Class removed, changed, or weekly rule paused');
     }
@@ -53,29 +71,33 @@ export class Scheduler {
   async attempt(job) {
     if (this.blockedKeys?.has(job.key)) return;
     const db = this.store.db;
-    const rule = this.store.rules().find(r => r.id === job.ruleId && r.enabled);
+    if (this.now() < job.dueAt || this.now() < job.nextAt) return;
+    const once = job.ruleId === 'one-time';
+    const snapshot = JSON.parse(job.data);
+    const rule = once ? { ...snapshot, waitlist: snapshot.scheduledWaitlist, pinInstructor: false } : this.store.rules().find(r => r.id === job.ruleId && r.enabled);
     if (!rule) return this.finish(job.key, 'cancelled', 'Weekly rule paused');
     if (this.now() > job.dueAt + 120000) return this.finish(job.key, 'missed', 'Opening window missed; no late booking attempted');
-    if (!this.live) return; // Preview mode cannot send a booking request.
+    if (!this.live && !once) return; // Weekly preview stays paused; explicitly scheduled one-time requests are authorized.
     const claim = db.prepare("UPDATE jobs SET status='running', attempts=attempts+1,updatedAt=? WHERE key=? AND status IN ('pending','retry')").run(this.now(), job.key);
     if (!claim.changes) return;
     try {
       if (!this.client.session && !(await this.connect())) throw new Error('Connect your club account first');
-      const snapshot = JSON.parse(job.data);
-      const current = (await this.client.calendar(snapshot.date, snapshot.date)).find(a => a.key === job.key);
+      this.client.dayCache?.clear();
+      const current = (await (this.client.fetchCalendarDay ? this.client.fetchCalendarDay(snapshot.date) : this.client.calendar(snapshot.date, snapshot.date))).find(a => a.key === job.key);
       if (!current || !matches(rule, current)) return this.finish(job.key, 'cancelled', 'Class changed or is no longer on the schedule');
       if ([2, 8].includes(current.status)) return this.finish(job.key, 'registered', 'Registration confirmed by the club');
-      if (current.status === 4) return this.finish(job.key, 'waitlisted', 'Waitlist confirmed by the club');
+      if ([4, 10].includes(current.status)) return this.finish(job.key, 'waitlisted', 'Waitlist confirmed by the club');
       if (current.paid || current.seatsMap || current.raw.RequireReserve || current.raw.HasCourt) return this.finish(job.key, 'failed', 'Manual booking needed: purchase, seat, or reservation selection');
       const waitlist = current.status === 1 && rule.waitlist;
       if ([0, 1].includes(current.status) && !waitlist) return this.finish(job.key, 'failed', 'Class full; waitlist not enabled or unavailable');
       if (![3, 5].includes(current.status) && !waitlist) throw new Error('Registration is not open yet');
-      if (!this.store.rules().some(r => r.id === job.ruleId && r.enabled) || !this.store.get('credentials')) return this.finish(job.key, 'cancelled', 'Rule paused or account disconnected');
+      if ((!once && !this.store.rules().some(r => r.id === job.ruleId && r.enabled)) || this.store.db.prepare('SELECT status FROM jobs WHERE key=?').get(job.key)?.status !== 'running' || !this.store.get('credentials')) return this.finish(job.key, 'cancelled', 'Rule paused or account disconnected');
       await this.client.register(current, waitlist);
       // Always read back. A successful HTTP request alone is not a confirmed booking.
-      const confirmed = (await this.client.calendar(current.date, current.date)).find(a => a.key === job.key);
+      this.client.dayCache?.clear();
+      const confirmed = (await (this.client.fetchCalendarDay ? this.client.fetchCalendarDay(current.date) : this.client.calendar(current.date, current.date))).find(a => a.key === job.key);
       if (confirmed && [2, 8].includes(confirmed.status)) return this.finish(job.key, 'registered', 'Registration confirmed by the club');
-      if (confirmed?.status === 4) return this.finish(job.key, 'waitlisted', 'Waitlist confirmed by the club');
+      if (confirmed && [4, 10].includes(confirmed.status)) return this.finish(job.key, 'waitlisted', 'Waitlist confirmed by the club');
       throw new Error('Booking response received; waiting for club confirmation');
     } catch (error) {
       if (error.code === 2 || error.code === 3) this.client.session = null;
@@ -101,8 +123,8 @@ export class Scheduler {
   }
   arm() {
     clearTimeout(this.timer);
-    const next = this.store.db.prepare("SELECT MIN(nextAt) AS at FROM jobs WHERE status IN ('pending','retry')").get()?.at;
-    const delay = next ? Math.max(this.live ? 20 : 1000, Math.min(next - this.now(), 1000)) : 1000;
+    const next = this.store.db.prepare("SELECT MIN(nextAt) AS at FROM jobs WHERE status IN ('pending','retry') AND (ruleId='one-time' OR ?=1)").get(Number(this.live))?.at;
+    const delay = next ? Math.max(20, Math.min(next - this.now(), 1000)) : 1000;
     this.timer = setTimeout(async () => { try { await this.tick(); } finally { this.arm(); } }, delay);
   }
   start() { this.arm(); }

@@ -88,3 +88,45 @@ test('removing a rule while schedule refresh is in flight cannot create jobs', a
   f.client.calendar = async () => { f.store.db.prepare('DELETE FROM rules').run(); return [f.a]; };
   await f.scheduler.sync(); assert.equal(f.job(), undefined);
 });
+
+test('one-time opening uses club window, survives restart and runs with weekly booking paused', async t => {
+  const f = fixture(t, { live: false });
+  const a = { ...f.a, status: 6, clubWindow: { NumberOfDays: 2, NumberOfMinutes: 30 } };
+  const dueAt = a.startsAt - 2 * DAY - 30 * 60000;
+  f.setNow(dueAt - 1000);
+  const result = f.scheduler.scheduleOnce(a);
+  assert.equal(result.opensAt, dueAt); assert.equal(result.openingEstimated, false);
+  f.store.db.prepare('DELETE FROM rules').run();
+  await f.scheduler.sync(); assert.equal(f.job().ruleId, 'one-time');
+  const restarted = new Scheduler(f.store, f.client, { live: false, now: () => dueAt - 1 });
+  await restarted.tick(); assert.equal(f.sends(), 0);
+  const onTime = new Scheduler(f.store, f.client, { live: false, now: () => dueAt });
+  await onTime.tick(); assert.equal(f.sends(), 1); assert.equal(f.job().status, 'registered');
+  await onTime.tick(); assert.equal(f.sends(), 1);
+});
+test('one-time schedule cancellation prevents a send and weekly sync does not replace it', async t => {
+  const f = fixture(t); f.scheduler.scheduleOnce({ ...f.a, status: 6 }, true);
+  await f.scheduler.sync(); assert.equal(f.job().ruleId, 'one-time');
+  assert.equal(JSON.parse(f.job().data).scheduledWaitlist, true);
+  f.scheduler.cancelScheduled(f.a.key);
+  f.setNow(f.a.dueAt); await f.scheduler.tick(); assert.equal(f.sends(), 0); assert.equal(f.job().status, 'cancelled');
+});
+test('one-time uncertain result is reconciled without duplicate registration', async t => {
+  const f = fixture(t, { live: false }); f.scheduler.scheduleOnce({ ...f.a, status: 6 });
+  f.failAfterSend(); f.setNow(f.a.dueAt); await f.scheduler.tick(); assert.equal(f.sends(), 1);
+  f.setNow(f.a.dueAt + 5001); await f.scheduler.tick(); assert.equal(f.sends(), 1); assert.equal(f.job().status, 'registered');
+});
+test('one-time waitlist preference is respected and late restarts do not book', async t => {
+  const f = fixture(t, { live: false }); f.scheduler.scheduleOnce({ ...f.a, status: 6 }, true);
+  f.setStatus(1); f.client.register = async (a, waitlist) => { assert.equal(waitlist, true); f.setStatus(4); };
+  f.setNow(f.a.dueAt); await f.scheduler.tick(); assert.equal(f.job().status, 'waitlisted');
+  const g = fixture(t, { live: false }); g.scheduler.scheduleOnce({ ...g.a, status: 6 });
+  g.setNow(g.a.dueAt + 121000); await g.scheduler.tick(); assert.equal(g.job().status, 'missed'); assert.equal(g.sends(), 0);
+});
+test('opening calculation preserves elapsed time at DST and labels fallback; invalid scheduling is rejected', async t => {
+  const f = fixture(t, { timestamp: '2026-10-25T08:00:00+02:00' });
+  const result = f.scheduler.scheduleOnce({ ...f.a, status: 6 });
+  assert.equal(result.openingEstimated, true); assert.equal(result.opensAt, f.a.startsAt - DAY);
+  assert.throws(() => f.scheduler.scheduleOnce({ ...f.a, status: 3 }));
+  assert.throws(() => f.scheduler.scheduleOnce({ ...f.a, status: 6, paid: true }));
+});

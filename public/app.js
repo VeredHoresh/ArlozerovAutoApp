@@ -54,6 +54,7 @@ function renderState() {
   $('#mode-banner').textContent = !state.live ? (state.connected ? 'הרשמה שבועית מושהית' : 'להרשמה לחוגים יש להתחבר לפיזיקל') : state.connected ? 'הרשמה שבועית פעילה' : 'כדי לאפשר הרשמה יש להתחבר לחשבון פיזיקל.';
   if (state.syncError) $('#mode-banner').textContent += ' לא ניתן לעדכן את לוח החוגים: ' + heText(state.syncError);
   renderRules(); renderJobs(); renderClasses();
+  if (view === 'upcoming') renderBookings();
 }
 async function loadCalendar(force = false) {
   const request = ++calendarRequest, start = selectedDate;
@@ -118,15 +119,17 @@ function renderClasses() {
     const saved = state.rules.find(r => r.lessonId === a.lessonId && r.weekday === a.weekday && r.time === a.time);
     const manual = a.paid || a.seatsMap;
     const registered = [2, 4, 8, 10].includes(a.status);
-    const button = el('button', 'repeat' + (registered ? ' saved' : '') + (full ? ' waitlist-button' : ''), registered ? 'צפייה בהרשמה' : manual ? 'הרשמה דרך פיזיקל' : a.status === 1 ? 'הצטרפות לרשימת המתנה' : a.status === 0 ? 'החוג מלא · אין רשימת המתנה' : 'הרשמה');
-    button.disabled = manual || a.status === 0; button.title = manual ? 'לחוג הזה נדרשת רכישה או בחירת מקום בפיזיקל' : a.status === 0 ? 'אין רשימת המתנה לחוג הזה' : '';
-    button.onclick = () => registered ? setView('upcoming') : openRule(a);
+    const scheduled = scheduledJobs().some(j => j.key === a.key);
+    const button = el('button', 'repeat' + (registered ? ' saved' : '') + (full ? ' waitlist-button' : ''), scheduled ? 'צפייה בתזמון' : registered ? 'צפייה בהרשמה' : manual ? 'הרשמה דרך פיזיקל' : a.status === 1 ? 'הצטרפות לרשימת המתנה' : a.status === 0 ? 'החוג מלא · אין רשימת המתנה' : a.status === 6 ? 'הרשמה בפתיחה' : 'הרשמה');
+    button.disabled = !scheduled && (manual || a.status === 0); button.title = manual ? 'לחוג הזה נדרשת רכישה או בחירת מקום בפיזיקל' : a.status === 0 ? 'אין רשימת המתנה לחוג הזה' : '';
+    button.onclick = () => (registered || scheduled) ? setView('upcoming') : openRule(a);
     row.append(time, stripe, details, status, button); list.append(row);
   }
 }
 function openRule(a) {
   selectedClass = a; $('#rule-form').reset(); $('#rule-error').textContent = '';
   $('#waitlist').checked = a.status === 1;
+  $('#single-choice-label').textContent = a.status === 6 ? 'הרשמה בפתיחה — למפגש הזה בלבד' : 'למפגש הזה בלבד';
   const title = el('strong', '', a.name); title.dir = 'auto';
   $('#rule-summary').replaceChildren(title, el('div', '', fmt(a.startsAt, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + ' · ' + minutesText(a.duration)), el('div', '', a.instructor));
   $('#next-booking').textContent = a.dueAt > Date.now() ? 'ניסיון ההרשמה הבא: ' + fmt(a.dueAt, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + ' (שעון ישראל)' : 'מועד ההרשמה האוטומטית למפגש הזה כבר חלף. ההרשמה השבועית תתחיל במועד ההרשמה הבא שטרם חלף.';
@@ -136,26 +139,31 @@ function openRule(a) {
   updateBookingMode(); $('#rule-dialog').showModal();
 }
 function updateBookingMode() {
-  const recurring = $('[name="booking-mode"]:checked').value === 'recurring';
+  const mode = $('[name="booking-mode"]:checked').value;
+  const recurring = mode === 'recurring', scheduled = !recurring && selectedClass.status === 6;
+  $('#scheduled-note').hidden = !scheduled;
+  const opensAt = selectedClass.opensAt ?? selectedClass.dueAt;
+  $('#scheduled-note').textContent = (selectedClass.openingEstimated ? 'מועד פתיחה משוער: ' : 'פתיחת ההרשמה: ') + fmt(opensAt, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) + '. ניסיון אוטומטי גם כשהאפליקציה סגורה. האישור תלוי במקום פנוי.' + (selectedClass.openingEstimated ? ' הקאנטרי לא מסר מועד פתיחה; הניסיון מתוזמן ל־24 שעות לפני החוג.' : '');
   $('#recurring-options').hidden = !recurring;
-  $('#single-note').hidden = recurring;
+  $('#single-note').hidden = recurring || scheduled;
   const waitlisting = selectedClass.status === 1;
   $('#waitlist').disabled = !recurring && waitlisting;
   if (!recurring && waitlisting) $('#waitlist').checked = true;
   $('#single-note').textContent = waitlisting ? 'החוג מלא. לחיצה על אישור תשלח בקשת הצטרפות לרשימת ההמתנה בפיזיקל.' : 'לחיצה על אישור תשלח בקשת הרשמה בפיזיקל למפגש הזה בלבד. ' + (statuses[selectedClass.status] || '');
   const exists = state.rules.some(r => r.lessonId === selectedClass.lessonId && r.weekday === selectedClass.weekday && r.time === selectedClass.time);
-  $('#register-submit').textContent = recurring ? (exists ? 'כבר הוגדרה הרשמה שבועית לחוג הזה' : 'שמירת הרשמה שבועית') : waitlisting ? 'הצטרפות לרשימת המתנה' : 'אישור הרשמה למפגש הזה';
-  $('#register-submit').disabled = recurring ? exists : !state.connected || ![1, 3, 5].includes(selectedClass.status) || selectedClass.startsAt <= Date.now();
+  $('#register-submit').textContent = scheduled ? 'שמירת הרשמה בפתיחה' : recurring ? (exists ? 'כבר הוגדרה הרשמה שבועית לחוג הזה' : 'שמירת הרשמה שבועית') : waitlisting ? 'הצטרפות לרשימת המתנה' : 'אישור הרשמה למפגש הזה';
+  $('#register-submit').disabled = scheduled ? !state.connected || selectedClass.status !== 6 || opensAt <= Date.now() || opensAt >= selectedClass.startsAt : recurring ? exists : !state.connected || ![1, 3, 5].includes(selectedClass.status) || selectedClass.startsAt <= Date.now();
 }
 document.querySelectorAll('[name="booking-mode"]').forEach(input => { input.onchange = updateBookingMode; });
 $('#rule-form').onsubmit = async event => {
   event.preventDefault(); const button = event.submitter; button.disabled = true; $('#rule-error').textContent = '';
   try {
-    const recurring = $('[name="booking-mode"]:checked').value === 'recurring';
-    const result = await api(recurring ? 'rules' : 'bookings/register', { method: 'POST', body: JSON.stringify({ key: selectedClass.key, date: selectedClass.date, start: week, waitlist: $('#waitlist').checked, pinInstructor: $('#pin-instructor').checked }) });
+    const mode = $('[name="booking-mode"]:checked').value;
+    const recurring = mode === 'recurring', scheduled = !recurring && selectedClass.status === 6;
+    const result = await api(scheduled ? 'bookings/schedule' : recurring ? 'rules' : 'bookings/register', { method: 'POST', body: JSON.stringify({ key: selectedClass.key, date: selectedClass.date, start: week, waitlist: $('#waitlist').checked, pinInstructor: $('#pin-instructor').checked }) });
     $('#rule-dialog').close();
-    toast(recurring ? (state.live ? 'ההרשמה השבועית נשמרה' : 'ההגדרה נשמרה. ההרשמה האוטומטית השבועית מושהית.') : result.status === 'waitlisted' ? 'ההצטרפות לרשימת ההמתנה אושרה בפיזיקל' : 'ההרשמה אושרה בפיזיקל');
-    refreshState().catch(() => {});
+    toast(scheduled ? 'התזמון נשמר. המערכת תנסה להירשם כשייפתח הרישום.' : recurring ? (state.live ? 'ההרשמה השבועית נשמרה' : 'ההגדרה נשמרה. ההרשמה האוטומטית השבועית מושהית.') : result.status === 'waitlisted' ? 'ההצטרפות לרשימת ההמתנה אושרה בפיזיקל' : 'ההרשמה אושרה בפיזיקל');
+    await refreshState();
     if (!recurring) { await setView('upcoming'); }
   } catch (e) { $('#rule-error').textContent = heText(e.message); }
   finally { button.disabled = false; }
@@ -203,12 +211,20 @@ async function loadBookings() {
     if (!state.connected) throw new Error('לצפייה בהרשמות יש להתחבר לחשבון פיזיקל.');
     const data = await api('bookings'); upcoming = data.classes;
     renderBookings(); error('');
-  } catch (e) { $('#bookings-list').replaceChildren(el('div', 'empty', heText(e.message))); }
+  } catch (e) { renderBookings(); error(heText(e.message)); }
   finally { $('#refresh-bookings').disabled = false; }
 }
+function scheduledJobs() { return state.jobs.filter(j => j.ruleId === 'one-time' && ['pending', 'retry', 'running'].includes(j.status)).sort((a,b) => a.dueAt - b.dueAt); }
 function renderBookings() {
   const list = $('#bookings-list'); list.replaceChildren();
-  if (!upcoming.length) return list.append(el('div', 'empty', 'אין הרשמות או מקומות ברשימות המתנה ל־60 הימים הקרובים.'));
+  for (const job of scheduledJobs()) {
+    const card = el('article', 'rule-card'), info = el('div');
+    info.append(el('h3', '', job.data.name), el('p', '', 'מפגש: ' + fmt(job.startsAt, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })), el('p', '', 'ניסיון הרשמה בפתיחה: ' + fmt(job.dueAt, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' })), el('p', '', job.status === 'running' ? 'ההרשמה מתבצעת — האישור עדיין לא התקבל' : 'מתוזמנת — עדיין אין הרשמה מאושרת'));
+    const cancel = el('button', 'button secondary', 'ביטול התזמון'); cancel.disabled = job.status === 'running';
+    cancel.onclick = async () => { cancel.disabled = true; try { await api('bookings/unschedule', { method: 'POST', body: JSON.stringify({ key: job.key, date: job.data.date }) }); await refreshState(); toast('התזמון בוטל. לא יישלח ניסיון הרשמה למפגש הזה.'); } catch (e) { error(heText(e.message)); cancel.disabled = false; } };
+    card.append(info, cancel); list.append(card);
+  }
+  if (!upcoming.length && !scheduledJobs().length) return list.append(el('div', 'empty', 'אין הרשמות או מקומות ברשימות המתנה ל־60 הימים הקרובים.'));
   for (const a of upcoming.sort((a,b) => a.startsAt-b.startsAt)) {
     const card = el('article', 'rule-card'), info = el('div'), title = el('h3', '', a.name); title.dir = 'auto';
     info.append(title, el('p', '', fmt(a.startsAt, { weekday:'long', day:'numeric', month:'long', hour:'2-digit', minute:'2-digit' })), el('p', '', [a.instructor, a.location].filter(Boolean).join(' · ')), el('p', '', statuses[a.status]));

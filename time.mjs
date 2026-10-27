@@ -9,6 +9,11 @@ export function shiftDate(date, days) {
   return d.toISOString().slice(0, 10);
 }
 export function weekday(date) { return new Date(`${date}T12:00:00Z`).getUTCDay(); }
+export function registrationOpening(startsAt, window) {
+  const days = window?.NumberOfDays, minutes = window?.NumberOfMinutes;
+  const known = Number.isFinite(days) && days >= 0 && Number.isFinite(minutes) && minutes >= 0;
+  return { opensAt: startsAt - (known ? (days * 1440 + minutes) * 60000 : DAY), openingEstimated: !known };
+}
 export function normalize(a) {
   // Fizikal includes the UTC offset. Never reinterpret it in the server's zone.
   const startsAt = Date.parse(a.StartDateTimeJson);
@@ -22,6 +27,7 @@ export function normalize(a) {
     lessonId: a.LessonID, activityId: a.ID, name: a.Name || a.Location?.Name || 'חוג',
     instructor: a.EmployeeName || '', instructorId: a.EmployeeID,
     location: a.Location?.Name || '', date, time, weekday: weekday(date), startsAt,
+    ...registrationOpening(startsAt, a.TimeBeforeRegistration),
     dueAt: startsAt - DAY, duration: a.DurationInMinutes, status: a.Status,
     places: a.OpenCount, capacity, registered, paid: !!a.PaidClass, seatsMap: !!a.SeatsMap,
     clubWindow: a.TimeBeforeRegistration || null, raw: a
