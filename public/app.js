@@ -54,7 +54,10 @@ function renderState() {
   $('#mode-banner').textContent = !state.live ? (state.connected ? 'הרשמה שבועית מושהית' : 'להרשמה לחוגים יש להתחבר לפיזיקל') : state.connected ? 'הרשמה שבועית פעילה' : 'כדי לאפשר הרשמה יש להתחבר לחשבון פיזיקל.';
   if (state.syncError) $('#mode-banner').textContent += ' לא ניתן לעדכן את לוח החוגים: ' + heText(state.syncError);
   renderRules(); renderJobs(); renderClasses();
-  if (view === 'upcoming') renderBookings();
+  if (view === 'upcoming') {
+    renderBookings();
+    if (state.jobs.some(j => j.ruleId === 'one-time' && ['registered', 'waitlisted'].includes(j.status) && j.startsAt > Date.now() && !upcoming.some(a => a.key === j.key))) loadBookings();
+  }
 }
 async function loadCalendar(force = false) {
   const request = ++calendarRequest, start = selectedDate;
