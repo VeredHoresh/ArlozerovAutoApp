@@ -105,3 +105,22 @@ test('scheduled registration API stores only the signed-in member request and su
   assert.equal((await post('unschedule',token)).status,200);
   assert.equal(a.store.db.prepare('SELECT status FROM jobs').get().status,'cancelled');assert.equal(f.members.get(1).writes,0);
 });
+
+test('saving a weekly rule reuses the selected day without fetching a week or waiting for reconnect', async t => {
+  const dir=mkdtempSync(join(tmpdir(),'arlo-fast-rule-')), f=fixture();let now=Date.now();
+  const accounts=new Accounts(dir,undefined,{...f,workers:false,now:()=>now}),server=createApplication(accounts);
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));
+  t.after(async()=>{await new Promise(r=>server.close(r));accounts.close();rmSync(dir,{recursive:true});});
+  const a=await accounts.login('0500000001','test-password');const data=await a.schedule('2050-10-28',1);const c=data.classes[0];
+  // The club is unavailable now, but trusted per-account metadata is already stored.
+  a.client.session=null;a.client.login=()=>new Promise(()=>{});a.client.calendar=()=>{throw new Error('unexpected club read');};now+=31000;
+  const origin=`http://127.0.0.1:${server.address().port}`,token=accounts.issue(a.account.id);
+  const r=await fetch(origin+'/api/rules',{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',Cookie:`arlo_session=${token}`},body:JSON.stringify({key:c.key,start:c.date})});
+  assert.equal(r.status,201);assert.equal(a.store.rules().length,1);
+});
+test('saved calendar retains manual booking restrictions when raw club data is omitted', async t => {
+  const dir=mkdtempSync(join(tmpdir(),'arlo-manual-metadata-')),f=fixture();const accounts=new Accounts(dir,undefined,{...f,workers:false});
+  t.after(()=>{accounts.close();rmSync(dir,{recursive:true});});
+  const a=await accounts.login('0500000001','test-password');a.client.calendar=async()=>[normalize({LessonID:1,StartHour:'190000',StartDateTimeJson:'2050-10-28T19:00:00+02:00',RequireReserve:true})];
+  const data=await a.schedule('2050-10-28',1);assert.equal(data.classes[0].raw,undefined);assert.equal(data.classes[0].manualBooking,true);
+});

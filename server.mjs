@@ -133,9 +133,9 @@ return http.createServer(async (req, res) => {
     if (url.pathname === '/api/rules' && req.method === 'POST') {
       const { key, start, waitlist = false, pinInstructor = false } = await body(req);
       if (typeof start !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(start) || typeof key !== 'string' || typeof waitlist !== 'boolean' || typeof pinInstructor !== 'boolean') return send(res, 400, { error: 'Choose a class from the schedule' });
-      const a = (await client.calendar(start, shiftDate(start, 6))).find(a => a.key === key);
+      const a = (await schedule(start, 1)).classes.find(a => a.key === key);
       if (!a) return send(res, 409, { error: 'Class changed. Refresh the schedule.' });
-      if (a.paid || a.seatsMap || a.raw.RequireReserve || a.raw.HasCourt) return send(res, 400, { error: 'This class requires manual booking on Fizikal' });
+      if (a.manualBooking || a.paid || a.seatsMap || a.raw?.RequireReserve || a.raw?.HasCourt) return send(res, 400, { error: 'This class requires manual booking on Fizikal' });
       if (store.rules().some(r => r.lessonId === a.lessonId && r.weekday === a.weekday && r.time === a.time)) return send(res, 409, { error: 'A weekly rule already exists for this class' });
       const rule = { id: randomUUID(), lessonId: a.lessonId, name: a.name, weekday: a.weekday, time: a.time, instructor: a.instructor, instructorId: a.instructorId, waitlist, pinInstructor, enabled: true, createdAt: Date.now() };
       store.db.prepare('INSERT INTO rules VALUES (?,?)').run(rule.id, JSON.stringify(rule));

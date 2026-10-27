@@ -29,6 +29,7 @@ export function normalize(a) {
     location: a.Location?.Name || '', date, time, weekday: weekday(date), startsAt,
     ...registrationOpening(startsAt, a.TimeBeforeRegistration),
     dueAt: startsAt - DAY, duration: a.DurationInMinutes, status: a.Status,
+    manualBooking: !!(a.PaidClass || a.SeatsMap || a.RequireReserve || a.HasCourt),
     places: a.OpenCount, capacity, registered, paid: !!a.PaidClass, seatsMap: !!a.SeatsMap,
     clubWindow: a.TimeBeforeRegistration || null, raw: a
   };

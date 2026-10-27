@@ -36,11 +36,10 @@ export class Accounts {
     client.reauthenticate = async () => { await memberReady(); return true; };
     scheduler.connect = memberReady;
     const schedule = async (start, days = 1, force = false) => {
-      await memberReady();
       const key = `calendar:${start}:${days}`, saved = store.get(key);
       const cached = saved ? JSON.parse(saved) : null;
       const refresh = () => {
-        if (!calendarLoads.has(key)) calendarLoads.set(key, client.calendar(start, shiftDate(start, days - 1)).then(classes => {
+        if (!calendarLoads.has(key)) calendarLoads.set(key, memberReady().then(() => client.calendar(start, shiftDate(start, days - 1))).then(classes => {
           const result = { classes: classes.map(publicClass), fetchedAt: this.now() };
           store.set(key, JSON.stringify(result)); return result;
         }).finally(() => calendarLoads.delete(key)));

@@ -9,7 +9,7 @@ const today = dateFormat.format(new Date());
 function shift(date, n) { const d = new Date(date + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 let week = shift(today, -new Date(today + 'T12:00:00Z').getUTCDay());
 let selectedDate = today, classes = [], state = { rules: [], jobs: [] }, selectedClass, view = 'schedule';
-let upcoming = [], cancellingClass;
+let upcoming = [], cancellingClass, bookingsRequest = null;
 const loadedDays = new Map();
 const pendingDays = new Map(), dayErrors = new Map(), daySections = new Map();
 let feedGeneration = 0, feedDates = [], loadingMore = false;
@@ -21,7 +21,7 @@ loadMoreButton.onclick = () => loadNextDay(true);
 let accountGeneration = 0;
 function clearAccountData() {
   accountGeneration++; feedGeneration++; dayObserver.disconnect(); feedDates = []; daySections.clear(); pendingDays.clear(); dayErrors.clear(); loadingMore = false; classes = []; upcoming = []; loadedDays.clear();
-  state = { rules: [], jobs: [], connected: false };
+  state = { rules: [], jobs: [], connected: false }; bookingsRequest = null;
   $('#classes').replaceChildren(el('div', 'empty', 'יש להיכנס לחשבון כדי לצפות בחוגים שלך.'));
   $('#bookings-list').replaceChildren(); $('#rules-list').replaceChildren(); $('#jobs-list').replaceChildren();
   $('#class-count').textContent = '—'; $('#active-count').textContent = '0'; $('#rule-count').textContent = '0';
@@ -224,7 +224,7 @@ function updateBookingMode() {
 }
 document.querySelectorAll('[name="booking-mode"]').forEach(input => { input.onchange = updateBookingMode; });
 $('#rule-form').onsubmit = async event => {
-  event.preventDefault(); const button = event.submitter; button.disabled = true; $('#rule-error').textContent = '';
+  event.preventDefault(); const button = event.submitter; button.disabled = true; button.textContent = 'הבקשה נשלחת…'; $('#rule-error').textContent = '';
   try {
     const mode = $('[name="booking-mode"]:checked').value;
     const recurring = mode === 'recurring', scheduled = !recurring && selectedClass.status === 6;
@@ -234,7 +234,7 @@ $('#rule-form').onsubmit = async event => {
     await refreshState();
     if (!recurring) { await setView('upcoming'); }
   } catch (e) { $('#rule-error').textContent = heText(e.message); }
-  finally { button.disabled = false; }
+  finally { updateBookingMode(); }
 };
 function renderRules() {
   const list = $('#rules-list'); list.replaceChildren();
@@ -274,14 +274,23 @@ function setView(name) {
   if (name === 'schedule') requestAnimationFrame(maybeLoadNextDay);
 }
 async function loadBookings() {
+  if (bookingsRequest) return bookingsRequest;
+  if (!state.connected) { error('לצפייה בהרשמות יש להתחבר לחשבון פיזיקל.'); return; }
+  const generation = accountGeneration;
   $('#refresh-bookings').disabled = true;
-  $('#bookings-list').replaceChildren(el('div', 'empty', 'ההרשמות שלך נבדקות מול פיזיקל…'));
-  try {
-    if (!state.connected) throw new Error('לצפייה בהרשמות יש להתחבר לחשבון פיזיקל.');
-    const data = await api('bookings'); upcoming = data.classes;
-    renderBookings(); error('');
-  } catch (e) { renderBookings(); error(heText(e.message)); }
-  finally { $('#refresh-bookings').disabled = false; }
+  renderBookings();
+  if (!upcoming.length && !scheduledJobs().length) $('#bookings-list').replaceChildren(el('div', 'empty', 'ההרשמות שלך נבדקות מול פיזיקל…'));
+  const request = (async () => {
+    try {
+      if (!state.connected) throw new Error('לצפייה בהרשמות יש להתחבר לחשבון פיזיקל.');
+      const data = await api('bookings');
+      if (generation !== accountGeneration) return;
+      upcoming = data.classes; renderBookings(); error('');
+    } catch (e) { if (generation === accountGeneration) { renderBookings(); error(heText(e.message)); } }
+    finally { if (generation === accountGeneration) { bookingsRequest = null; $('#refresh-bookings').disabled = false; } }
+  })();
+  bookingsRequest = request;
+  return request;
 }
 function scheduledJobs() { return state.jobs.filter(j => j.ruleId === 'one-time' && ['pending', 'retry', 'running'].includes(j.status)).sort((a,b) => a.dueAt - b.dueAt); }
 function renderBookings() {
@@ -341,7 +350,7 @@ $('#signout').onclick = async () => {
 };
 $('#auth-form').onsubmit = async event => {
   event.preventDefault(); const button = event.submitter; button.disabled = true;
-  try { const fields = new FormData(event.target); await api('auth', { method: 'POST', body: JSON.stringify({ phone: fields.get('phone'), password: fields.get('password') }) }); event.target.reset(); clearAccountData(); $('#auth-dialog').close(); await initialize(); toast('הכניסה הצליחה. החשבון יישאר מחובר בטלפון הזה.'); }
+  try { const fields = new FormData(event.target); await api('auth', { method: 'POST', body: JSON.stringify({ phone: fields.get('phone'), password: fields.get('password') }) }); event.target.reset(); clearAccountData(); $('#auth-dialog').close(); toast('הכניסה הצליחה. החשבון יישאר מחובר בטלפון הזה.'); await initialize(); }
   catch (e) { $('#auth-error').textContent = heText(e.message); } finally { button.disabled = false; }
 };
 $('#auth-dialog').addEventListener('cancel', event => event.preventDefault());
