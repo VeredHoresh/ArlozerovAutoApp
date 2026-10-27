@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { openStore } from '../store.mjs';
 import { Scheduler } from '../scheduler.mjs';
-import { normalize, DAY } from '../time.mjs';
+import { normalize, DAY, israelDate, matches } from '../time.mjs';
 function fixture(t, { live = true, timestamp = '2026-10-28T19:00:00+02:00' } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'arlo-test-'));
   const store = openStore(dir);
@@ -129,4 +129,40 @@ test('opening calculation preserves elapsed time at DST and labels fallback; inv
   assert.equal(result.openingEstimated, true); assert.equal(result.opensAt, f.a.startsAt - DAY);
   assert.throws(() => f.scheduler.scheduleOnce({ ...f.a, status: 3 }));
   assert.throws(() => f.scheduler.scheduleOnce({ ...f.a, status: 6, paid: true }));
+});
+
+
+test('Israel local date and weekday are independent of UTC midnight in winter and summer', () => {
+  assert.equal(israelDate(Date.parse('2026-01-06T22:30:00Z')), '2026-01-07');
+  assert.equal(israelDate(Date.parse('2026-07-07T21:30:00Z')), '2026-07-08');
+  for (const timestamp of ['2026-01-07T00:30:00+02:00', '2026-07-08T00:30:00+03:00']) {
+    const a=normalize({LessonID:1,StartHour:'003000',StartDateTimeJson:timestamp});
+    assert.equal(a.weekday,3);assert.equal(a.date,timestamp.slice(0,10));assert.equal(a.time,'00:30');
+  }
+});
+test('weekly local class time stays fixed across both Israel clock changes', () => {
+  for (const timestamps of [
+    ['2026-03-25T19:00:00+02:00','2026-04-01T19:00:00+03:00'],
+    ['2026-10-21T19:00:00+03:00','2026-10-28T19:00:00+02:00']
+  ]) {
+    const [a,b]=timestamps.map(StartDateTimeJson=>normalize({LessonID:1,StartHour:'190000',StartDateTimeJson}));
+    const rule={lessonId:1,weekday:3,time:'19:00'};
+    assert.ok(matches(rule,a));assert.ok(matches(rule,b));
+    assert.equal(a.startsAt-a.dueAt,DAY);assert.equal(b.startsAt-b.dueAt,DAY);
+    assert.equal(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit'}).format(b.startsAt),'19:00');
+    assert.equal(Math.abs(b.startsAt-a.startsAt-7*DAY),3600000);
+  }
+});
+test('spring clock change uses 24 elapsed hours and worker does not register early', async t => {
+  const f=fixture(t,{timestamp:'2026-03-27T08:00:00+03:00'});
+  assert.equal(new Date(f.a.dueAt).toISOString(),'2026-03-26T05:00:00.000Z');
+  assert.equal(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Jerusalem',hour:'2-digit',minute:'2-digit'}).format(f.a.dueAt),'07:00');
+  await f.scheduler.sync();f.setNow(f.a.dueAt-1);await f.scheduler.tick();assert.equal(f.sends(),0);
+  f.setNow(f.a.dueAt);await f.scheduler.tick();assert.equal(f.sends(),1);
+});
+test('calendar refresh updates a pending weekly UTC target when the club corrects the timestamp', async t => {
+  const f=fixture(t);await f.scheduler.sync();const corrected={...f.a,startsAt:f.a.startsAt+3600000,dueAt:f.a.dueAt+3600000};
+  f.client.calendar=async()=>[{...corrected,status:3}];await f.scheduler.sync();
+  assert.equal(f.job().dueAt,corrected.dueAt);assert.equal(f.job().nextAt,corrected.dueAt);assert.equal(f.job().startsAt,corrected.startsAt);
+  f.setNow(f.a.dueAt);await f.scheduler.tick();assert.equal(f.sends(),0);
 });

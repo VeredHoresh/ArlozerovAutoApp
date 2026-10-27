@@ -176,7 +176,7 @@ function renderRules() {
   if (!state.rules.length) return list.append(el('div', 'empty', 'עדיין לא הוגדרה הרשמה שבועית. לצד החוג הרצוי לוחצים על ״הרשמה״ ואז בוחרים ״הרשמה אוטומטית בכל שבוע״.'));
   for (const r of state.rules) {
     const card = el('article', 'rule-card'), info = el('div'), title = el('h3', '', r.name); title.dir = 'auto';
-    info.append(title, el('p', '', `בכל ${r.weekday === 6 ? 'שבת' : 'יום ' + days[r.weekday]} בשעה ${r.time} · ${r.enabled ? 'פעילה' : 'מושהית'}`), el('p', '', `ניסיון הרשמה 24 שעות לפני החוג · ${r.waitlist ? 'הצטרפות לרשימת המתנה מופעלת' : 'ללא הצטרפות לרשימת המתנה'} · ${r.pinInstructor ? 'רק עם המדריך או המדריכה שנבחרו' : 'עם כל מדריך או מדריכה'}`));
+    info.append(title, el('p', '', `בכל ${r.weekday === 6 ? 'שבת' : 'יום ' + days[r.weekday]} בשעה ${r.time} (שעון ישראל) · ${r.enabled ? 'פעילה' : 'מושהית'}`), el('p', '', `ניסיון הרשמה 24 שעות לפני החוג · ${r.waitlist ? 'הצטרפות לרשימת המתנה מופעלת' : 'ללא הצטרפות לרשימת המתנה'} · ${r.pinInstructor ? 'רק עם המדריך או המדריכה שנבחרו' : 'עם כל מדריך או מדריכה'}`));
     const next = state.jobs.filter(j => j.ruleId === r.id && ['pending', 'retry', 'running'].includes(j.status)).sort((a,b) => a.dueAt-b.dueAt)[0];
     info.append(el('p', '', next ? 'ניסיון ההרשמה הבא: ' + fmt(next.dueAt, { weekday: 'long', day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'מועד ההרשמה הבא יוצג לאחר עדכון לוח החוגים.'));
     const actions = el('div', 'card-actions'), toggle = el('button', '', r.enabled ? 'השהיה' : 'חידוש ההרשמה'), remove = el('button', '', 'הסרה');

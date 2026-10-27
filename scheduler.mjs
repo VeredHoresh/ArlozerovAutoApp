@@ -52,7 +52,7 @@ export class Scheduler {
       // A newly enabled rule never causes a surprise immediate, late booking.
       if (!job && a.dueAt < this.now()) continue;
       db.prepare(`INSERT INTO jobs(key,ruleId,dueAt,startsAt,status,nextAt,updatedAt,data) VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(key) DO UPDATE SET data=excluded.data, ruleId=excluded.ruleId WHERE jobs.status='pending' AND jobs.ruleId != 'one-time'`)
+        ON CONFLICT(key) DO UPDATE SET data=excluded.data, ruleId=excluded.ruleId, dueAt=excluded.dueAt, startsAt=excluded.startsAt, nextAt=excluded.nextAt WHERE jobs.status='pending' AND jobs.ruleId != 'one-time'`)
         .run(a.key, rule.id, a.dueAt, a.startsAt, 'pending', a.dueAt, this.now(), JSON.stringify(a));
     }
     // Only cancel missing occurrences inside the fetched range. Future records survive range boundaries.
