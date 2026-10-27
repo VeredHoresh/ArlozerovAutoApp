@@ -86,7 +86,7 @@ function renderDays() {
   $('#days').replaceChildren();
   days.forEach((day, i) => {
     const date = shift(week, i), button = el('button', 'day' + (date === selectedDate ? ' selected' : '') + (date === today ? ' is-today' : ''));
-    button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', date === selectedDate ? 'true' : 'false');
+    button.setAttribute('aria-label', fmt(new Date(date + 'T12:00:00Z'), { weekday: 'long', day: 'numeric', month: 'long' })); button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', date === selectedDate ? 'true' : 'false');
     button.append(el('small', '', day.slice(0, 3)), el('strong', '', Number(date.slice(-2))));
     button.onclick = () => { selectedDate = date; loadCalendar(); };
     $('#days').append(button);
@@ -183,9 +183,9 @@ function renderJobs() {
 }
 function setView(name) {
   view = name;
-  const titles = { upcoming: ['Your upcoming classes', 'Confirmed registrations and waitlist places, straight from Fizikal.'], schedule: ['Your week starts here', 'Find your rhythm. Turn the classes you love into a weekly routine.'], rules: ['Your recurring classes', 'Manage, pause, or remove your weekly registrations.'], activity: ['Every booking, in view', 'See upcoming targets, registration attempts, and confirmed results.'] };
+  const titles = { upcoming: ['My bookings', 'Confirmed registrations and waitlist places, straight from Fizikal.'], schedule: ['Find a class', '1. Choose a day. 2. Find your class. 3. Tap Register.'], rules: ['Weekly bookings', 'Manage, pause, or remove your weekly registrations.'], activity: ['Booking history', 'See upcoming targets, registration attempts, and confirmed results.'] };
   for (const key of Object.keys(titles)) $('#' + key + '-view').hidden = key !== name;
-  document.querySelectorAll('.nav').forEach(n => n.classList.toggle('active', n.dataset.view === name));
+  document.querySelectorAll('.nav').forEach(n => { n.classList.toggle('active', n.dataset.view === name); n.setAttribute('aria-current', n.dataset.view === name ? 'page' : 'false'); });
   $('#breadcrumb').textContent = { upcoming: 'UPCOMING CLASSES', schedule: 'CLASS SCHEDULE', rules: 'RECURRING CLASSES', activity: 'BOOKING ACTIVITY' }[name];
   $('#page-title').replaceChildren(document.createTextNode(titles[name][0]), el('span', '', '.'));
   $('#page-description').textContent = titles[name][1]; $('#refresh').hidden = name !== 'schedule';
@@ -258,3 +258,6 @@ $('#auth-dialog').addEventListener('cancel', event => event.preventDefault());
 async function initialize() { try { await refreshState(); await loadCalendar(); } catch (e) { if (!$('#auth-dialog').open) error(e.message); } }
 renderDays(); initialize();
 setInterval(() => { if (!document.hidden && !$('#auth-dialog').open) refreshState().catch(() => {}); }, 15000);
+
+// Keep the user's password visible only when they explicitly request it.
+document.querySelectorAll('.password-toggle').forEach(button => { button.onclick = () => { const input = button.closest('form').querySelector('[name="password"]'); const visible = input.type === 'password'; input.type = visible ? 'text' : 'password'; button.textContent = visible ? 'Hide password' : 'Show password'; button.setAttribute('aria-pressed', String(visible)); }; });
