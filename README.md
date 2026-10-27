@@ -4,10 +4,11 @@ A personal, multi-account app for Arlozorov 97. Displays Fizikal's live schedule
 
 ## Run locally
 
-Requires Node.js 24 or newer. No external packages or installation are needed.
+Requires Node.js 24 or newer. Run `npm ci` to install the Web Push dependency before starting.
 
 ```powershell
 cd arlo-auto
+npm ci
 node --env-file-if-exists=.env server.mjs
 ```
 
@@ -78,3 +79,7 @@ Legacy single-account rules and attempts remain intact and migrate only after th
 ## Scrolling through days
 
 The schedule starts at the selected day. As the next-day button approaches the viewport, the browser appends another day and requests only `/api/calendar?start=YYYY-MM-DD&days=1`. Earlier sections remain in place while that day loads. Each day has its own loading, saved-data, error and retry state; simultaneous requests for the same date are shared. Account changes discard pending results and clear the feed. Day tabs and week navigation restart the feed at the chosen date, while search filters the days already loaded. Automatic loading stops after 14 days; the next-day button remains available for deliberate continuation and keyboard access.
+
+## Notifications on your phone
+
+After signing in, open More (עוד), select Enable notifications on this phone (הפעלת התראות בטלפון הזה), and allow the browser permission. Notifications report final automatic registration confirmations, waitlists, or failed attempts even with the app closed. Tap an alert to open My bookings. You can disable alerts from the same menu; signing out also removes that phone’s subscription. Browser and phone settings control whether delivery is allowed. Weekly registration remains paused unless BOOKING_ENABLED is enabled separately.

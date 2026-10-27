@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { openStore } from './store.mjs';
 import { Fizikal } from './fizikal.mjs';
 import { Scheduler } from './scheduler.mjs';
+import { loadPushKeys, PushNotifications } from './notifications.mjs';
 import { shiftDate } from './time.mjs';
 const YEAR = 365 * 86400000;
 const digest = token => createHash('sha256').update(token).digest('hex');
@@ -10,6 +11,7 @@ const publicClass = ({ raw, ...a }) => a;
 export class Accounts {
   constructor(dir, key, { live = false, clientFactory = () => new Fizikal(), now = () => Date.now(), workers = true } = {}) {
     this.dir = dir; this.key = key; this.live = live; this.clientFactory = clientFactory; this.now = now; this.workers = workers;
+    this.pushKeys = loadPushKeys(dir);
     this.root = openStore(dir, key); this.contexts = new Map();
     this.root.db.exec(`CREATE TABLE IF NOT EXISTS accounts(id TEXT PRIMARY KEY,memberKey TEXT UNIQUE NOT NULL,name TEXT NOT NULL,createdAt INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS devices(hash TEXT PRIMARY KEY,accountId TEXT NOT NULL,expiresAt INTEGER NOT NULL);
@@ -51,9 +53,10 @@ export class Accounts {
       }
       try { return await refresh(); } catch (e) { if (cached) return { ...cached, stale: true }; throw e; }
     };
-    const context = { account, store, client, scheduler, bookingLocks, schedule, memberReady };
+    const notifier = new PushNotifications(store, { keys:this.pushKeys, now:this.now, deviceActive:hash => !!this.root.db.prepare('SELECT hash FROM devices WHERE hash=? AND accountId=? AND expiresAt>?').get(hash,account.id,this.now()) });
+    const context = { account, store, client, scheduler, bookingLocks, schedule, memberReady, notifier };
     this.contexts.set(account.id, context);
-    if (this.workers) scheduler.start();
+    if (this.workers) { scheduler.start(); notifier.start(); }
     return context;
   }
   start() {
@@ -113,9 +116,9 @@ export class Accounts {
     this.root.db.prepare('UPDATE devices SET expiresAt=? WHERE hash=?').run(this.now() + YEAR, digest(token));
     return this.context(account);
   }
-  logout(token) { if (token) this.root.db.prepare('DELETE FROM devices WHERE hash=?').run(digest(token)); }
-  revokeAll(accountId) { this.root.db.prepare('DELETE FROM devices WHERE accountId=?').run(accountId); }
-  close() { for (const c of this.contexts.values()) { c.scheduler.stop(); c.store.db.close(); } this.root.db.close(); }
+  logout(token) { if (token) { const hash=digest(token); for (const c of this.contexts.values()) c.notifier.unsubscribeDevice(hash); this.root.db.prepare('DELETE FROM devices WHERE hash=?').run(hash); } }
+  revokeAll(accountId) { this.contexts.get(accountId)?.notifier.clear(); this.root.db.prepare('DELETE FROM devices WHERE accountId=?').run(accountId); }
+  close() { for (const c of this.contexts.values()) { c.scheduler.stop(); c.notifier.stop(); c.store.db.close(); } this.root.db.close(); }
 }
 export function sessionCookie(token, secure = false) {
   return `arlo_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 365 * 86400 : 0}${secure ? '; Secure' : ''}`;

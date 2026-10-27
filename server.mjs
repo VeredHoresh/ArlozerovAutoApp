@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { deviceHash } from './notifications.mjs';
 import { Accounts, sessionCookie } from './accounts.mjs';
 import { Fizikal } from './fizikal.mjs';
 import { israelDate, shiftDate } from './time.mjs';
@@ -15,7 +16,7 @@ async function body(req) {
   return JSON.parse(value || '{}');
 }
 function publicClass(a) { const { raw, ...rest } = a; return rest; }
-const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/he.js': ['he.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/install.js': ['install.js', 'text/javascript'], '/sw.js': ['sw.js', 'text/javascript'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/offline.html': ['offline.html', 'text/html'], ...Object.fromEntries(['icon-192.png','icon-512.png','icon-maskable.png','apple-touch-icon.png','hug-192.png','hug-512.png','hug-maskable.png','hug-apple-touch.png'].map(name => ['/' + name, [name, 'image/png']])) };
+const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/he.js': ['he.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/install.js': ['install.js', 'text/javascript'], '/push.js': ['push.js', 'text/javascript'], '/sw.js': ['sw.js', 'text/javascript'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/offline.html': ['offline.html', 'text/html'], ...Object.fromEntries(['icon-192.png','icon-512.png','icon-maskable.png','apple-touch-icon.png','hug-192.png','hug-512.png','hug-maskable.png','hug-apple-touch.png'].map(name => ['/' + name, [name, 'image/png']])) };
 export function createApplication(accounts, { secure = false } = {}) {
 const failures = new Map();
 const getToken = req => req.headers.cookie?.match(/(?:^|; )arlo_session=([^;]+)/)?.[1];
@@ -53,7 +54,10 @@ return http.createServer(async (req, res) => {
     if (!context) return send(res, 401, { error: 'Sign in with your Fizikal account' });
     if (req.headers['x-arlo-account'] && req.headers['x-arlo-account'] !== context.account.id) return send(res, 409, { error: 'The signed-in account changed. Please sign in again.', code: 'ACCOUNT_CHANGED' });
     res.setHeader('Set-Cookie', sessionCookie(token, secure));
-    const { store, client, scheduler, bookingLocks, schedule, memberReady } = context;
+    const { store, client, scheduler, bookingLocks, schedule, memberReady, notifier } = context;
+    if (url.pathname === '/api/push/config' && req.method === 'GET') return send(res,200,{publicKey:accounts.pushKeys.publicKey,enabled:!!store.db.prepare('SELECT id FROM push_subscriptions WHERE deviceHash=?').get(deviceHash(token))});
+    if (url.pathname === '/api/push/subscription' && req.method === 'POST') { notifier.subscribe(await body(req),deviceHash(token)); return send(res,201,{ok:true}); }
+    if (url.pathname === '/api/push/subscription' && req.method === 'DELETE') { notifier.unsubscribeDevice(deviceHash(token)); return send(res,200,{ok:true}); }
     if (url.pathname === '/api/logout' && req.method === 'POST') {
       accounts.logout(token); res.setHeader('Set-Cookie', sessionCookie('', secure));
       return send(res, 200, { ok: true });

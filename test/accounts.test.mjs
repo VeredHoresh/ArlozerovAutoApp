@@ -124,3 +124,16 @@ test('saved calendar retains manual booking restrictions when raw club data is o
   const a=await accounts.login('0500000001','test-password');a.client.calendar=async()=>[normalize({LessonID:1,StartHour:'190000',StartDateTimeJson:'2050-10-28T19:00:00+02:00',RequireReserve:true})];
   const data=await a.schedule('2050-10-28',1);assert.equal(data.classes[0].raw,undefined);assert.equal(data.classes[0].manualBooking,true);
 });
+
+test('push subscriptions belong to the authenticated phone and are revoked on logout',async t=>{
+ const {createECDH,randomBytes}=await import('node:crypto');const e=createECDH('prime256v1');e.generateKeys();
+ const subscription={endpoint:'https://fcm.googleapis.com/fcm/send/phone-test',keys:{p256dh:e.getPublicKey().toString('base64url'),auth:randomBytes(16).toString('base64url')}};
+ const dir=mkdtempSync(join(tmpdir(),'hug-push-http-')),f=fixture(),accounts=new Accounts(dir,undefined,{...f,workers:false});const server=createApplication(accounts);
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));t.after(async()=>{await new Promise(r=>server.close(r));accounts.close();rmSync(dir,{recursive:true});});
+ const origin=`http://127.0.0.1:${server.address().port}`;const a=await accounts.login('0500000001','test-password'),b=await accounts.login('0500000002','test-password');const ta=accounts.issue(a.account.id),tb=accounts.issue(b.account.id);
+ const req=(route,token,method='GET',data)=>fetch(origin+'/api/'+route,{method,headers:{Origin:origin,'Content-Type':'application/json',...(token?{Cookie:`arlo_session=${token}`}:{})},body:data?JSON.stringify(data):undefined});
+ assert.equal((await req('push/config',null)).status,401);assert.equal((await req('push/subscription',ta,'POST',subscription)).status,201);
+ assert.equal((await(await req('push/config',ta)).json()).enabled,true);assert.equal((await(await req('push/config',tb)).json()).enabled,false);
+ await req('push/subscription',tb,'DELETE');assert.equal((await(await req('push/config',ta)).json()).enabled,true);
+ await req('logout',ta,'POST');assert.equal(a.store.db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').get().n,0);
+});

@@ -83,3 +83,5 @@ html[dir=rtl] .offline-page{margin:10vh auto}
 
 .brand-logo{display:block;flex-shrink:0;object-fit:contain;border-radius:10px}.brand .brand-logo{width:44px;height:44px}.brand{letter-spacing:0}
 @media(max-width:1000px){.brand .brand-logo{width:40px;height:40px}}
+
+.push-options{width:100%;border-top:1px solid var(--line);padding-top:12px}.push-options button{width:100%}.push-options p{font-size:.9rem;line-height:1.5;color:#47594f;margin:8px 0}

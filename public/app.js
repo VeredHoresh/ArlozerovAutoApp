@@ -28,6 +28,7 @@ function clearAccountData() {
   $('#member-label').textContent = 'כניסה עם חשבון פיזיקל'; $('#account-label').textContent = 'החשבון האישי שלך';
   $('#mode-banner').textContent = 'יש להיכנס עם חשבון הפיזיקל האישי כדי לנהל את החוגים שלך.';
   $('#error').hidden = true;
+  window.dispatchEvent(new Event('accountstate'));
   for (const d of document.querySelectorAll('dialog[open]')) if (d.id !== 'auth-dialog') d.close();
 }
 function el(tag, className, text) { const n = document.createElement(tag); if (className) n.className = className; if (text !== undefined) n.textContent = text; return n; }
@@ -60,6 +61,7 @@ function renderState() {
   $('#mode-banner').textContent = !state.live ? (state.connected ? 'הרשמה שבועית מושהית' : 'להרשמה לחוגים יש להתחבר לפיזיקל') : state.connected ? 'הרשמה שבועית פעילה' : 'כדי לאפשר הרשמה יש להתחבר לחשבון פיזיקל.';
   if (state.syncError) $('#mode-banner').textContent += ' לא ניתן לעדכן את לוח החוגים: ' + heText(state.syncError);
   renderRules(); renderJobs(); renderClasses();
+  window.dispatchEvent(new Event('accountstate'));
   if (view === 'upcoming') {
     renderBookings();
     if (state.jobs.some(j => j.ruleId === 'one-time' && ['registered', 'waitlisted'].includes(j.status) && j.startsAt > Date.now() && !upcoming.some(a => a.key === j.key))) loadBookings();
@@ -354,7 +356,7 @@ $('#auth-form').onsubmit = async event => {
   catch (e) { $('#auth-error').textContent = heText(e.message); } finally { button.disabled = false; }
 };
 $('#auth-dialog').addEventListener('cancel', event => event.preventDefault());
-async function initialize() { try { await refreshState(); await loadCalendar(); } catch (e) { if (!$('#auth-dialog').open) error(heText(e.message)); } }
+async function initialize() { try { await refreshState(); if (new URLSearchParams(location.search).get('view') === 'upcoming') await setView('upcoming'); else await loadCalendar(); } catch (e) { if (!$('#auth-dialog').open) error(heText(e.message)); } }
 renderDays(); initialize();
 setInterval(() => { if (!document.hidden && !$('#auth-dialog').open) refreshState().catch(() => {}); }, 15000);
 
