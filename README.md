@@ -83,3 +83,7 @@ The schedule starts at the selected day. As the next-day button approaches the v
 ## Notifications on your phone
 
 After signing in, open More (עוד), select Enable notifications on this phone (הפעלת התראות בטלפון הזה), and allow the browser permission. Notifications report final automatic registration confirmations, waitlists, or failed attempts even with the app closed. Tap an alert to open My bookings. You can disable alerts from the same menu; signing out also removes that phone’s subscription. Browser and phone settings control whether delivery is allowed. Weekly registration remains paused unless BOOKING_ENABLED is enabled separately.
+
+## Keeping class loading responsive
+
+After displaying a day, the browser prefetches only the next unseen day, so scrolling can use its in-memory result without waiting for another request. Active accounts also warm today's and tomorrow's per-account server snapshots at most once every two minutes, stopping after ten minutes without app activity. This work yields near an automatic booking deadline. Cached availability is labelled when stale and is always checked again before registration. A first-ever uncached day still depends on the club API's response time.

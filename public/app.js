@@ -104,6 +104,13 @@ function appendDay(date) {
   section.append(heading, list); daySections.set(date, {section,list}); feedDates.push(date);
   $('#classes').insertBefore(section, loadMoreButton);
 }
+function prefetchNextDay() {
+  if (view !== 'schedule' || !state.connected || !feedDates.length || feedDates.length >= 14 || dayErrors.has(feedDates.at(-1))) return;
+  // Keep just one unseen day ahead. Never fetch the rest of the week eagerly.
+  const next = shift(feedDates.at(-1), 1);
+  const cached = loadedDays.get(next);
+  if (!cached || Date.now() - cached.fetchedAt >= 30000) loadDay(next).catch(() => {});
+}
 async function loadCalendar(force = false) {
   const generation = ++feedGeneration;
   feedDates = []; daySections.clear(); loadingMore = false;
@@ -115,7 +122,7 @@ async function loadCalendar(force = false) {
   finally {
     if (generation === feedGeneration) {
       $('#refresh').disabled = false; loadMoreButton.disabled = false;
-      dayObserver.observe(loadMoreButton); maybeLoadNextDay();
+      dayObserver.observe(loadMoreButton); maybeLoadNextDay(); prefetchNextDay();
     }
   }
 }
@@ -134,7 +141,7 @@ async function loadNextDay(manual = false) {
     if (generation === feedGeneration) {
       loadingMore = false; loadMoreButton.disabled = false;
       loadMoreButton.textContent = feedDates.length >= 14 ? 'הצגת ימים נוספים' : 'הצגת היום הבא';
-      maybeLoadNextDay();
+      maybeLoadNextDay(); prefetchNextDay();
     }
   }
 }

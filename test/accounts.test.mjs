@@ -137,3 +137,13 @@ test('push subscriptions belong to the authenticated phone and are revoked on lo
  await req('push/subscription',tb,'DELETE');assert.equal((await(await req('push/config',ta)).json()).enabled,true);
  await req('logout',ta,'POST');assert.equal(a.store.db.prepare('SELECT COUNT(*) AS n FROM push_subscriptions').get().n,0);
 });
+
+test('active-account warming fetches today and tomorrow once and yields near booking deadlines',async t=>{
+ const {israelDate,shiftDate}=await import('../time.mjs');const dir=mkdtempSync(join(tmpdir(),'hug-warm-')),f=fixture();let now=Date.now();
+ const accounts=new Accounts(dir,undefined,{...f,workers:true,now:()=>now});t.after(()=>{accounts.close();rmSync(dir,{recursive:true});});
+ const a=await accounts.login('0500000001','test-password'),calls=[];const original=a.client.calendar.bind(a.client);a.client.calendar=async(start,end)=>{calls.push([start,end]);return original(start,end)};
+ await a.warmSchedule();assert.deepEqual(calls,[[israelDate(now),israelDate(now)],[shiftDate(israelDate(now),1),shiftDate(israelDate(now),1)]]);
+ await a.warmSchedule();assert.equal(calls.length,2);
+ now+=120001;a.store.db.prepare('INSERT INTO jobs(key,ruleId,dueAt,startsAt,status,nextAt,updatedAt,data) VALUES (?,?,?,?,?,?,?,?)').run('near','one-time',now+30000,now+86400000,'pending',now+30000,now,'{}');
+ await a.warmSchedule();assert.equal(calls.length,2);
+});

@@ -4,7 +4,7 @@ import { openStore } from './store.mjs';
 import { Fizikal } from './fizikal.mjs';
 import { Scheduler } from './scheduler.mjs';
 import { loadPushKeys, PushNotifications } from './notifications.mjs';
-import { shiftDate } from './time.mjs';
+import { shiftDate, israelDate } from './time.mjs';
 const YEAR = 365 * 86400000;
 const digest = token => createHash('sha256').update(token).digest('hex');
 const publicClass = ({ raw, ...a }) => a;
@@ -55,8 +55,29 @@ export class Accounts {
     };
     const notifier = new PushNotifications(store, { keys:this.pushKeys, now:this.now, deviceActive:hash => !!this.root.db.prepare('SELECT hash FROM devices WHERE hash=? AND accountId=? AND expiresAt>?').get(hash,account.id,this.now()) });
     const context = { account, store, client, scheduler, bookingLocks, schedule, memberReady, notifier };
+    context.lastActiveAt = 0;
+    let warming = false, lastWarmAt = -Infinity;
+    context.warmSchedule = async () => {
+      if (!this.workers || warming || this.now() - lastWarmAt < 120000 || !store.get('credentials')) return;
+      // Background viewing must yield to automatic registration near its deadline.
+      const next = store.db.prepare("SELECT MIN(nextAt) AS at FROM jobs WHERE status IN ('pending','retry','running') AND (ruleId='one-time' OR ?=1)").get(Number(scheduler.live))?.at;
+      if (next && next >= this.now()-120000 && next < this.now()+60000) return;
+      warming = true; lastWarmAt = this.now();
+      try {
+        const date = israelDate(this.now());
+        await schedule(date, 1);
+        await schedule(shiftDate(date, 1), 1);
+      } catch { /* The foreground day request reports errors and offers retry. */ }
+      finally { warming = false; }
+    };
     this.contexts.set(account.id, context);
-    if (this.workers) { scheduler.start(); notifier.start(); }
+    if (this.workers) {
+      scheduler.start(); notifier.start();
+      context.warmTimer = setInterval(() => {
+        if (this.now() - context.lastActiveAt < 600000) context.warmSchedule().catch(() => {});
+      }, 120000);
+      context.warmTimer.unref();
+    }
     return context;
   }
   start() {
@@ -114,11 +135,14 @@ export class Accounts {
     const account = this.root.db.prepare('SELECT * FROM accounts WHERE id=?').get(device.accountId);
     if (!account) return null;
     this.root.db.prepare('UPDATE devices SET expiresAt=? WHERE hash=?').run(this.now() + YEAR, digest(token));
-    return this.context(account);
+    const context = this.context(account);
+    context.lastActiveAt = this.now();
+    context.warmSchedule().catch(() => {});
+    return context;
   }
   logout(token) { if (token) { const hash=digest(token); for (const c of this.contexts.values()) c.notifier.unsubscribeDevice(hash); this.root.db.prepare('DELETE FROM devices WHERE hash=?').run(hash); } }
   revokeAll(accountId) { this.contexts.get(accountId)?.notifier.clear(); this.root.db.prepare('DELETE FROM devices WHERE accountId=?').run(accountId); }
-  close() { for (const c of this.contexts.values()) { c.scheduler.stop(); c.notifier.stop(); c.store.db.close(); } this.root.db.close(); }
+  close() { for (const c of this.contexts.values()) { c.scheduler.stop(); c.notifier.stop(); clearInterval(c.warmTimer); c.store.db.close(); } this.root.db.close(); }
 }
 export function sessionCookie(token, secure = false) {
   return `arlo_session=${token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${token ? 365 * 86400 : 0}${secure ? '; Secure' : ''}`;
