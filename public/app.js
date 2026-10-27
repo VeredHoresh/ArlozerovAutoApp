@@ -8,14 +8,20 @@ const days = ['ראשון', 'שני', 'שלישי', 'רביעי', 'חמישי', 
 const today = dateFormat.format(new Date());
 function shift(date, n) { const d = new Date(date + 'T12:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); }
 let week = shift(today, -new Date(today + 'T12:00:00Z').getUTCDay());
-let selectedDate = today, classes = [], state = { rules: [], jobs: [] }, selectedClass, view = 'schedule', calendarRequest = 0;
+let selectedDate = today, classes = [], state = { rules: [], jobs: [] }, selectedClass, view = 'schedule';
 let upcoming = [], cancellingClass;
-let calendarLoading = false, calendarError = '', loadedWeek = null;
 const loadedDays = new Map();
+const pendingDays = new Map(), dayErrors = new Map(), daySections = new Map();
+let feedGeneration = 0, feedDates = [], loadingMore = false;
+const loadMoreButton = el('button', 'button secondary load-more', 'הצגת היום הבא');
+const dayObserver = new IntersectionObserver(entries => {
+  if (entries.some(entry => entry.isIntersecting)) maybeLoadNextDay();
+}, { rootMargin: '120px 0px' });
+loadMoreButton.onclick = () => loadNextDay(true);
 let accountGeneration = 0;
 function clearAccountData() {
-  accountGeneration++; calendarRequest++; classes = []; upcoming = []; loadedDays.clear();
-  state = { rules: [], jobs: [], connected: false }; calendarLoading = false; calendarError = ''; loadedWeek = null;
+  accountGeneration++; feedGeneration++; dayObserver.disconnect(); feedDates = []; daySections.clear(); pendingDays.clear(); dayErrors.clear(); loadingMore = false; classes = []; upcoming = []; loadedDays.clear();
+  state = { rules: [], jobs: [], connected: false };
   $('#classes').replaceChildren(el('div', 'empty', 'יש להיכנס לחשבון כדי לצפות בחוגים שלך.'));
   $('#bookings-list').replaceChildren(); $('#rules-list').replaceChildren(); $('#jobs-list').replaceChildren();
   $('#class-count').textContent = '—'; $('#active-count').textContent = '0'; $('#rule-count').textContent = '0';
@@ -59,32 +65,76 @@ function renderState() {
     if (state.jobs.some(j => j.ruleId === 'one-time' && ['registered', 'waitlisted'].includes(j.status) && j.startsAt > Date.now() && !upcoming.some(a => a.key === j.key))) loadBookings();
   }
 }
-async function loadCalendar(force = false) {
-  const request = ++calendarRequest, start = selectedDate;
-  const savedDay = loadedDays.get(start);
-  if (!force && savedDay && Date.now() - savedDay.fetchedAt < 30000) {
-    calendarLoading = false; calendarError = ''; renderDays(); renderClasses(); return;
-  }
-  calendarLoading = true; calendarError = '';
-  $('#refresh').disabled = true;
+async function loadDay(date, force = false) {
+  if (pendingDays.has(date)) return pendingDays.get(date);
+  const cached = loadedDays.get(date);
+  if (!force && cached && Date.now() - cached.fetchedAt < 30000) { renderClasses(); return; }
+  const generation = accountGeneration;
+  dayErrors.delete(date);
+  const request = (async () => {
+    try {
+      const data = await api('calendar?start=' + date + '&days=1' + (force ? '&refresh=1' : ''));
+      if (generation !== accountGeneration) return;
+      const dayClasses = data.classes.filter(a => a.date === date);
+      loadedDays.set(date, { ...data, classes: dayClasses });
+      classes = [...classes.filter(a => a.date !== date), ...dayClasses];
+      $('#class-count').textContent = classes.length;
+      const value = $('#type-filter').value;
+      $('#type-filter').replaceChildren(new Option('כל החוגים', ''));
+      [...new Set(classes.map(a => a.name))].sort((a,b) => a.localeCompare(b,'he')).forEach(name => $('#type-filter').add(new Option(name,name)));
+      $('#type-filter').value = value;
+      $('#sync-label').textContent = (data.stale ? 'לוח חוגים שמור · עודכן בשעה ' : 'לוח חוגים מעודכן · עודכן בשעה ') + fmt(data.fetchedAt, {hour:'2-digit',minute:'2-digit'});
+    } catch (e) {
+      if (generation === accountGeneration) dayErrors.set(date, heText(e.message));
+    } finally {
+      if (generation === accountGeneration) { pendingDays.delete(date); renderClasses(); }
+    }
+  })();
+  pendingDays.set(date, request);
   renderClasses();
-  renderDays(); error('');
-  try {
-    const data = await api('calendar?start=' + start + '&days=1' + (force ? '&refresh=1' : ''));
-    if (request !== calendarRequest) return;
-    loadedDays.set(start, data);
-    classes = [...classes.filter(a => a.date !== start), ...data.classes];
-    loadedWeek = start; calendarLoading = false;
-    $('#class-count').textContent = classes.filter(a => a.date >= week && a.date <= shift(week, 6)).length;
-    $('#sync-label').textContent = (data.stale ? 'לוח חוגים שמור · עודכן בשעה ' : 'לוח חוגים מעודכן · עודכן בשעה ') + fmt(data.fetchedAt, { hour: '2-digit', minute: '2-digit' });
-    if (data.stale) error('פיזיקל מגיבה לאט. מוצג לוח החוגים האחרון שנשמר; זמינות המקום תיבדק בעת ההרשמה.');
-    const value = $('#type-filter').value;
-    $('#type-filter').replaceChildren(new Option('כל החוגים', ''));
-    [...new Set(classes.map(a => a.name))].sort((a, b) => a.localeCompare(b, 'he')).forEach(name => $('#type-filter').add(new Option(name, name)));
-    $('#type-filter').value = value;
-    renderClasses();
-  } catch (e) { if (request === calendarRequest) { calendarError = 'לא ניתן לטעון את לוח החוגים מפיזיקל. לניסיון נוסף יש ללחוץ על ״עדכון לוח החוגים״.'; error(heText(e.message)); } }
-  finally { if (request === calendarRequest) { calendarLoading = false; $('#refresh').disabled = false; renderClasses(); } }
+  return request;
+}
+function appendDay(date) {
+  const section = el('section', 'schedule-day'); section.dataset.date = date;
+  const heading = el('h2', 'day-heading', fmt(new Date(date + 'T12:00:00Z'), {weekday:'long',day:'numeric',month:'long'}));
+  heading.id = 'day-' + date; section.setAttribute('aria-labelledby', heading.id);
+  const list = el('div', 'day-classes');
+  section.append(heading, list); daySections.set(date, {section,list}); feedDates.push(date);
+  $('#classes').insertBefore(section, loadMoreButton);
+}
+async function loadCalendar(force = false) {
+  const generation = ++feedGeneration;
+  feedDates = []; daySections.clear(); loadingMore = false;
+  dayObserver.disconnect(); $('#classes').replaceChildren(loadMoreButton);
+  loadMoreButton.hidden = false; loadMoreButton.disabled = true;
+  appendDay(selectedDate); renderDays(); renderClasses(); error('');
+  $('#refresh').disabled = true;
+  try { await loadDay(selectedDate, force); }
+  finally {
+    if (generation === feedGeneration) {
+      $('#refresh').disabled = false; loadMoreButton.disabled = false;
+      dayObserver.observe(loadMoreButton); maybeLoadNextDay();
+    }
+  }
+}
+function maybeLoadNextDay() {
+  if (view !== 'schedule' || !state.connected || $('#auth-dialog').open || loadingMore || !feedDates.length || pendingDays.has(feedDates.at(-1)) || dayErrors.has(feedDates.at(-1))) return;
+  const rect = loadMoreButton.getBoundingClientRect();
+  if (rect.top < innerHeight + 120 && rect.bottom > 0 && feedDates.length < 14) loadNextDay();
+}
+async function loadNextDay(manual = false) {
+  if (loadingMore || !feedDates.length || (!manual && feedDates.length >= 14)) return;
+  const generation = feedGeneration;
+  const date = shift(feedDates.at(-1), 1); loadingMore = true; loadMoreButton.disabled = true;
+  appendDay(date);
+  try { await loadDay(date); }
+  finally {
+    if (generation === feedGeneration) {
+      loadingMore = false; loadMoreButton.disabled = false;
+      loadMoreButton.textContent = feedDates.length >= 14 ? 'הצגת ימים נוספים' : 'הצגת היום הבא';
+      maybeLoadNextDay();
+    }
+  }
 }
 function renderDays() {
   const start = new Date(week + 'T12:00:00Z'), end = new Date(shift(week, 6) + 'T12:00:00Z');
@@ -92,7 +142,7 @@ function renderDays() {
   $('#days').replaceChildren();
   days.forEach((day, i) => {
     const date = shift(week, i), button = el('button', 'day' + (date === selectedDate ? ' selected' : '') + (date === today ? ' is-today' : ''));
-    button.setAttribute('aria-label', fmt(new Date(date + 'T12:00:00Z'), { weekday: 'long', day: 'numeric', month: 'long' })); button.setAttribute('role', 'tab'); button.setAttribute('aria-selected', date === selectedDate ? 'true' : 'false');
+    button.setAttribute('aria-label', fmt(new Date(date + 'T12:00:00Z'), { weekday: 'long', day: 'numeric', month: 'long' })); button.setAttribute('aria-pressed', date === selectedDate ? 'true' : 'false');
     button.append(el('small', '', day), el('strong', '', Number(date.slice(-2))));
     button.onclick = () => { selectedDate = date; loadCalendar(); };
     $('#days').append(button);
@@ -101,11 +151,26 @@ function renderDays() {
 }
 const statuses = { 0: 'החוג מלא', 1: 'אפשר להצטרף לרשימת המתנה', 2: 'ההרשמה אושרה', 3: 'ההרשמה פתוחה', 4: 'ברשימת ההמתנה', 5: 'נותרו מקומות מעטים', 6: 'ההרשמה טרם נפתחה', 7: 'ההרשמה נסגרה', 8: 'ההרשמה אושרה', 9: 'נקבעה תזכורת', 10: 'התפנה מקום מרשימת ההמתנה' };
 function renderClasses() {
+  $('#result-count').textContent = '';
+  for (const date of feedDates) renderDayClasses(date, daySections.get(date).list);
+}
+function renderDayClasses(date, list) {
   const q = $('#search').value.toLocaleLowerCase().trim(), type = $('#type-filter').value;
-  const filtered = classes.filter(a => a.date === selectedDate && (!type || a.name === type) && (!q || (a.name + ' ' + a.instructor).toLocaleLowerCase().includes(q))).sort((a, b) => a.startsAt - b.startsAt);
-  $('#result-count').textContent = filtered.length === 1 ? 'חוג אחד' : `${filtered.length} חוגים`;
-  const list = $('#classes'); list.replaceChildren();
-  if (!filtered.length) return list.append(el('div', 'empty', calendarLoading ? 'החוגים ליום הנבחר נטענים מפיזיקל…' : calendarError || (loadedDays.has(selectedDate) ? 'לא נמצאו חוגים ביום ובסינון שנבחרו.' : 'לטעינת החוגים ליום הזה יש ללחוץ על ״עדכון לוח החוגים״.')));
+  const filtered = classes.filter(a => a.date === date && (!type || a.name === type) && (!q || (a.name + ' ' + a.instructor).toLocaleLowerCase().includes(q))).sort((a,b) => a.startsAt - b.startsAt);
+  list.replaceChildren();
+  list.setAttribute('aria-busy', pendingDays.has(date) ? 'true' : 'false');
+  const data = loadedDays.get(date), failure = dayErrors.get(date);
+  if (data?.stale) list.append(el('p', 'day-notice', 'מוצג לוח שמור. הזמינות תיבדק בעת ההרשמה.'));
+  if (failure) {
+    list.append(el('p', 'inline-error', failure));
+    const retry = el('button', 'button secondary', 'ניסיון נוסף');
+    retry.onclick = async () => { await loadDay(date, true); maybeLoadNextDay(); };
+    list.append(retry);
+  }
+  if (!filtered.length) {
+    if (!failure) list.append(el('div', 'empty', pendingDays.has(date) ? 'החוגים ליום הזה בטעינה…' : data ? 'לא נמצאו חוגים ביום ובסינון שנבחרו.' : 'החוגים ייטענו בהמשך הגלילה.'));
+    return;
+  }
   for (const a of filtered) {
     const full = [0, 1].includes(a.status);
     const row = el('article', 'class-row' + (full ? ' is-full' : ''));
@@ -163,7 +228,7 @@ $('#rule-form').onsubmit = async event => {
   try {
     const mode = $('[name="booking-mode"]:checked').value;
     const recurring = mode === 'recurring', scheduled = !recurring && selectedClass.status === 6;
-    const result = await api(scheduled ? 'bookings/schedule' : recurring ? 'rules' : 'bookings/register', { method: 'POST', body: JSON.stringify({ key: selectedClass.key, date: selectedClass.date, start: week, waitlist: $('#waitlist').checked, pinInstructor: $('#pin-instructor').checked }) });
+    const result = await api(scheduled ? 'bookings/schedule' : recurring ? 'rules' : 'bookings/register', { method: 'POST', body: JSON.stringify({ key: selectedClass.key, date: selectedClass.date, start: selectedClass.date, waitlist: $('#waitlist').checked, pinInstructor: $('#pin-instructor').checked }) });
     $('#rule-dialog').close();
     toast(scheduled ? 'התזמון נשמר. המערכת תנסה להירשם כשייפתח הרישום.' : recurring ? (state.live ? 'ההרשמה השבועית נשמרה' : 'ההגדרה נשמרה. ההרשמה האוטומטית השבועית מושהית.') : result.status === 'waitlisted' ? 'ההצטרפות לרשימת ההמתנה אושרה בפיזיקל' : 'ההרשמה אושרה בפיזיקל');
     await refreshState();
@@ -206,6 +271,7 @@ function setView(name) {
   $('#page-title').replaceChildren(document.createTextNode(titles[name][0]), el('span', '', '.'));
   $('#page-description').textContent = titles[name][1]; $('#refresh').hidden = name !== 'schedule';
   if (name === 'upcoming') return loadBookings();
+  if (name === 'schedule') requestAnimationFrame(maybeLoadNextDay);
 }
 async function loadBookings() {
   $('#refresh-bookings').disabled = true;

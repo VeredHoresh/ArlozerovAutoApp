@@ -75,3 +75,8 @@ html[dir=rtl] .offline-page{margin:10vh auto}
 @media(max-width:1000px){.week-picker #prev-week{grid-column:1;grid-row:1}.week-picker #today{grid-column:2;grid-row:1}.week-picker #next-week{grid-column:3;grid-row:1}}
 
 .booking-submit{position:sticky;bottom:-22px;background:#fff;padding:10px 0 4px;border-top:1px solid var(--line);margin-top:12px}.booking-submit .full{margin-top:0}
+
+/* Load and append whole days without replacing earlier scroll content. */
+.schedule-panel>.list-header{display:none}
+.schedule-day{scroll-margin-top:16px}.day-heading{font-size:1.1rem;margin:0;padding:12px 0;background:#eef3ec;border-bottom:1px solid var(--line);line-height:1.5}
+.schedule-day+.schedule-day{margin-top:16px}.day-notice{font-size:.9rem;color:#53450e;background:#fff8dc;padding:10px}.load-more{display:block;width:100%;margin:16px 0;min-height:48px}.day-classes .empty{padding:36px 12px;min-height:140px}

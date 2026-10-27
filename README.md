@@ -74,3 +74,7 @@ All API routes require a personal Fizikal sign-in, including on localhost. Each 
 Sign out / Switch account revokes only this phone session; weekly routines continue. Disconnect all phones revokes every session for that account, removes its stored Fizikal credentials, and pauses its routines. Another member’s data is untouched. A year of inactivity, explicit logout, browser storage removal, or a new authentication requirement can require sign-in again. This is persistent sign-in, not a promise of permanent access.
 
 Legacy single-account rules and attempts remain intact and migrate only after that same Fizikal membership signs in successfully. The prior development browser session cannot automatically select the owner’s account; sign in once in the updated app.
+
+## Scrolling through days
+
+The schedule starts at the selected day. As the next-day button approaches the viewport, the browser appends another day and requests only `/api/calendar?start=YYYY-MM-DD&days=1`. Earlier sections remain in place while that day loads. Each day has its own loading, saved-data, error and retry state; simultaneous requests for the same date are shared. Account changes discard pending results and clear the feed. Day tabs and week navigation restart the feed at the chosen date, while search filters the days already loaded. Automatic loading stops after 14 days; the next-day button remains available for deliberate continuation and keyboard access.
