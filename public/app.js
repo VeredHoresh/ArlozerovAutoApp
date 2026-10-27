@@ -51,7 +51,7 @@ function renderState() {
   $('#account-label').textContent = state.connected ? 'ניהול החשבון' : 'חשבון פיזיקל';
   $('#disconnect').hidden = !state.connected;
   $('#mode-banner').classList.toggle('live', state.live && state.connected);
-  $('#mode-banner').textContent = !state.live ? (state.connected ? 'החשבון מחובר לפיזיקל. אפשר להירשם למפגש בודד. ההרשמה האוטומטית השבועית מושהית.' : 'להרשמה לחוגים יש להתחבר לפיזיקל. ההרשמה האוטומטית השבועית מושהית.') : state.connected ? 'החשבון מחובר לפיזיקל. ההרשמה האוטומטית השבועית פעילה.' : 'כדי לאפשר הרשמה יש להתחבר לחשבון פיזיקל.';
+  $('#mode-banner').textContent = !state.live ? (state.connected ? 'הרשמה שבועית מושהית' : 'להרשמה לחוגים יש להתחבר לפיזיקל') : state.connected ? 'הרשמה שבועית פעילה' : 'כדי לאפשר הרשמה יש להתחבר לחשבון פיזיקל.';
   if (state.syncError) $('#mode-banner').textContent += ' לא ניתן לעדכן את לוח החוגים: ' + heText(state.syncError);
   renderRules(); renderJobs(); renderClasses();
 }
@@ -186,6 +186,8 @@ function renderJobs() {
 }
 function setView(name) {
   view = name;
+  closePhoneMenu();
+  if (window.matchMedia('(max-width: 1000px)').matches) window.scrollTo(0, 0);
   const titles = { upcoming: ['ההרשמות שלי', 'ההרשמות ורשימות ההמתנה שלך, לפי הנתונים בפיזיקל.'], schedule: ['חיפוש חוג', '1. בוחרים יום. 2. בוחרים חוג. 3. לוחצים על ״הרשמה״.'], rules: ['הרשמה שבועית', 'ניהול, השהיה או הסרה של ההרשמה השבועית לחוגים.'], activity: ['פעולות הרשמה', 'מועדי ההרשמה הבאים, ניסיונות הרשמה והתוצאות שאושרו.'] };
   for (const key of Object.keys(titles)) $('#' + key + '-view').hidden = key !== name;
   document.querySelectorAll('.nav').forEach(n => { n.classList.toggle('active', n.dataset.view === name); n.setAttribute('aria-current', n.dataset.view === name ? 'page' : 'false'); });
@@ -270,3 +272,18 @@ document.querySelectorAll('input[required]').forEach(input => {
   input.addEventListener('invalid', () => { input.setCustomValidity(input.validity.valueMissing ? (input.name === 'phone' ? 'יש להזין מספר טלפון.' : 'יש להזין סיסמה לפיזיקל.') : 'יש לבדוק את הערך שהוזן.'); });
   input.addEventListener('input', () => input.setCustomValidity(''));
 });
+
+function closePhoneMenu() {
+  document.querySelector('.sidebar').classList.remove('menu-open');
+  $('#phone-menu').setAttribute('aria-expanded', 'false');
+}
+$('#phone-menu').onclick = () => {
+  const open = document.querySelector('.sidebar').classList.toggle('menu-open');
+  $('#phone-menu').setAttribute('aria-expanded', String(open));
+};
+
+// Reserve space for the bottom navigation, including when text is enlarged.
+const phoneNavigation = document.querySelector('.sidebar nav');
+new ResizeObserver(() => {
+  document.documentElement.style.setProperty('--phone-nav-height', phoneNavigation.getBoundingClientRect().height + 'px');
+}).observe(phoneNavigation);
