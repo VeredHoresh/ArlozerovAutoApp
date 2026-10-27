@@ -59,7 +59,8 @@ function renderState() {
   $('#disconnect').hidden = !state.connected;
   $('#mode-banner').classList.toggle('live', state.live && state.connected);
   $('#mode-banner').textContent = !state.live ? (state.connected ? 'הרשמה שבועית מושהית' : 'להרשמה לחוגים יש להתחבר לפיזיקל') : state.connected ? 'הרשמה שבועית פעילה' : 'כדי לאפשר הרשמה יש להתחבר לחשבון פיזיקל.';
-  if (state.syncError) $('#mode-banner').textContent += ' לא ניתן לעדכן את לוח החוגים: ' + heText(state.syncError);
+  // A recurring worker error does not describe the selected calendar day's loading state.
+  if (state.live && state.syncError) $('#mode-banner').textContent += ' · יש לבדוק את פעולות ההרשמה';
   renderRules(); renderJobs(); renderClasses();
   window.dispatchEvent(new Event('accountstate'));
   if (view === 'upcoming') {
@@ -75,7 +76,7 @@ async function loadDay(date, force = false) {
   dayErrors.delete(date);
   const request = (async () => {
     try {
-      const data = await api('calendar?start=' + date + '&days=1' + (force ? '&refresh=1' : ''));
+      const data = await api('calendar?start=' + date + '&days=1' + (force ? '&refresh=1' : ''), { signal: AbortSignal.timeout(15000) });
       if (generation !== accountGeneration) return;
       const dayClasses = data.classes.filter(a => a.date === date);
       loadedDays.set(date, { ...data, classes: dayClasses });
@@ -87,7 +88,7 @@ async function loadDay(date, force = false) {
       $('#type-filter').value = value;
       $('#sync-label').textContent = (data.stale ? 'לוח חוגים שמור · עודכן בשעה ' : 'לוח חוגים מעודכן · עודכן בשעה ') + fmt(data.fetchedAt, {hour:'2-digit',minute:'2-digit'});
     } catch (e) {
-      if (generation === accountGeneration) dayErrors.set(date, heText(e.message));
+      if (generation === accountGeneration) dayErrors.set(date, ['TimeoutError', 'AbortError'].includes(e.name) ? 'פיזיקל מגיבה לאט. אפשר לנסות שוב או לבחור יום אחר.' : 'לא ניתן לטעון את היום הזה מפיזיקל. אפשר לנסות שוב.');
     } finally {
       if (generation === accountGeneration) { pendingDays.delete(date); renderClasses(); }
     }

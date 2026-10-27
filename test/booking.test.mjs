@@ -166,3 +166,9 @@ test('calendar refresh updates a pending weekly UTC target when the club correct
   assert.equal(f.job().dueAt,corrected.dueAt);assert.equal(f.job().nextAt,corrected.dueAt);assert.equal(f.job().startsAt,corrected.startsAt);
   f.setNow(f.a.dueAt);await f.scheduler.tick();assert.equal(f.sends(),0);
 });
+
+
+test('paused weekly automation does not scan two weeks or surface a stale sync error',async t=>{
+ const f=fixture(t,{live:false});let reads=0;f.client.calendar=async()=>{reads++;throw new Error('club timed out')};
+ f.scheduler.syncError='old timeout';await f.scheduler.tick();assert.equal(reads,0);assert.equal(f.scheduler.syncError,null);
+});

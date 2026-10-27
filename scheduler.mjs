@@ -115,7 +115,8 @@ export class Scheduler {
       const jobs = this.store.db.prepare("SELECT * FROM jobs WHERE status IN ('pending','retry') AND nextAt<=? ORDER BY dueAt").all(this.now());
       for (const job of jobs) await this.attempt(job);
       const nextDue = this.store.db.prepare("SELECT MIN(nextAt) AS at FROM jobs WHERE status IN ('pending','retry')").get()?.at;
-      if (this.now() - this.lastSync >= 300000 && (!nextDue || nextDue - this.now() > 30000)) {
+      if (!this.live) { this.syncError = null; this.lastSync = this.now(); }
+      if (this.live && this.now() - this.lastSync >= 300000 && (!nextDue || nextDue - this.now() > 30000)) {
         try { await this.sync(); }
         catch (e) { this.syncError = String(e.message).slice(0, 250); this.lastSync = this.now() - 240000; }
       }
