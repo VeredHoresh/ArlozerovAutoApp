@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "Arlo Auto",
+  "short_name": "Arlo Auto",
+  "description": "Your Arlozorov 97 class schedule, bookings, and weekly routines.",
+  "lang": "en",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f7f8f5",
+  "theme_color": "#204d43",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/icon-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
