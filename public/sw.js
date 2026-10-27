@@ -1,5 +1,5 @@
-const CACHE = 'arlo-shell-v2';
-const STATIC = ['/offline.html', '/style.css', '/icon-192.png', '/icon-512.png', '/icon-maskable.png', '/apple-touch-icon.png'];
+const CACHE = 'arlo-shell-v3';
+const STATIC = ['/offline.html', '/style.css', '/hug-192.png', '/hug-512.png', '/hug-maskable.png', '/hug-apple-touch.png'];
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(STATIC)).then(() => self.skipWaiting()));
 });

@@ -1,7 +1,7 @@
 {
   "id": "/",
-  "name": "ארלו אוטו",
-  "short_name": "ארלו אוטו",
+  "name": "החוג שלי",
+  "short_name": "החוג שלי",
   "description": "לוח החוגים, ההרשמות וההרשמה השבועית שלך בקאנטרי ארלוזורוב 97.",
   "lang": "he",
   "start_url": "/",
@@ -11,19 +11,19 @@
   "theme_color": "#204d43",
   "icons": [
     {
-      "src": "/icon-192.png",
+      "src": "/hug-192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-512.png",
+      "src": "/hug-512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/icon-maskable.png",
+      "src": "/hug-maskable.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
