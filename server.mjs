@@ -15,7 +15,7 @@ async function body(req) {
   return JSON.parse(value || '{}');
 }
 function publicClass(a) { const { raw, ...rest } = a; return rest; }
-const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/install.js': ['install.js', 'text/javascript'], '/sw.js': ['sw.js', 'text/javascript'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/offline.html': ['offline.html', 'text/html'], ...Object.fromEntries(['icon-192.png','icon-512.png','icon-maskable.png','apple-touch-icon.png'].map(name => ['/' + name, [name, 'image/png']])) };
+const files = { '/': ['index.html', 'text/html'], '/app.js': ['app.js', 'text/javascript'], '/he.js': ['he.js', 'text/javascript'], '/style.css': ['style.css', 'text/css'], '/install.js': ['install.js', 'text/javascript'], '/sw.js': ['sw.js', 'text/javascript'], '/manifest.webmanifest': ['manifest.webmanifest', 'application/manifest+json'], '/offline.html': ['offline.html', 'text/html'], ...Object.fromEntries(['icon-192.png','icon-512.png','icon-maskable.png','apple-touch-icon.png'].map(name => ['/' + name, [name, 'image/png']])) };
 export function createApplication(accounts, { secure = false } = {}) {
 const failures = new Map();
 const getToken = req => req.headers.cookie?.match(/(?:^|; )arlo_session=([^;]+)/)?.[1];

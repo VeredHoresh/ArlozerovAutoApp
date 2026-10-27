@@ -19,7 +19,7 @@ export function normalize(a) {
   const registered = capacity !== null && Number.isInteger(a.OpenCount) && a.OpenCount >= 0 && a.OpenCount <= capacity ? capacity - a.OpenCount : null;
   return {
     key: `${a.LessonID}:${date}:${a.StartHour}`,
-    lessonId: a.LessonID, activityId: a.ID, name: a.Name || a.Location?.Name || 'Class',
+    lessonId: a.LessonID, activityId: a.ID, name: a.Name || a.Location?.Name || 'חוג',
     instructor: a.EmployeeName || '', instructorId: a.EmployeeID,
     location: a.Location?.Name || '', date, time, weekday: weekday(date), startsAt,
     dueAt: startsAt - DAY, duration: a.DurationInMinutes, status: a.Status,

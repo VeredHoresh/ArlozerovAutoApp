@@ -16,3 +16,20 @@ dialog{width:calc(100% - 32px);max-width:560px;max-height:calc(100dvh - 32px);ov
 @media(max-width:1000px){.sidebar{position:static;width:auto;border-right:0;border-bottom:2px solid var(--line);padding:20px;display:flex;gap:16px}.brand{margin:0}.brand small,.club,.topbar,.sidebar .timing-note{display:none}.sidebar nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;width:100%}.nav{margin:0;justify-content:flex-start;min-width:0;padding:12px 10px}.sidebar-bottom{margin:0;padding:0;display:flex;gap:16px;flex-wrap:wrap;align-items:center}.account-button{width:auto;flex:1;margin:0;padding:8px 0;border:0}.install-button{width:auto;margin:0}.account-button strong{font-size:1rem}.account-button small{font-size:.85rem}.avatar{display:none}main{margin:0}.content{padding:20px}.page-heading{flex-direction:column;gap:20px}.page-heading .button{width:100%}h1{font-size:1.85rem}.days{grid-template-columns:repeat(7,minmax(0,1fr));gap:2px;padding:10px 4px}.day small{font-size:.8rem}.day strong{font-size:1.15rem}.day{min-width:0;padding:10px 0}.schedule-toolbar{padding:16px}.class-list{padding:0 16px}.class-row{grid-template-columns:75px minmax(0,1fr);gap:10px 14px}.class-time strong{font-size:1.2rem}.class-time small{font-size:.9rem}.class-details h3{font-size:1.15rem}.class-details p{font-size:1rem}.repeat{font-size:1rem}.panel-footer{font-size:.85rem}.panel-footer>span:last-child{display:block}.bottom-note p{font-size:1rem}.app-footer{font-size:.85rem}.rule-card,.job-card{flex-direction:column}.card-actions{align-self:stretch}.card-actions button{flex:1}.banner{font-size:1rem;margin-bottom:24px}dialog{padding:22px}.search span{display:none}.list-header{margin:16px}.occupancy{font-size:.9rem}.full-badge{font-size:.85rem}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation:none!important;transition:none!important}}
 @media(max-width:1000px){.sidebar{flex-direction:column;align-items:stretch}.sidebar nav{flex:none}.sidebar-bottom{width:100%}.brand{align-self:flex-start}.status{display:flex}.nav span{flex-shrink:0}.nav b{margin-left:4px}.account-button{min-width:160px}}
+
+/* Hebrew layout. Keep times and phone numbers in their natural reading order. */
+html[dir=rtl] body{font-family:Arial,'Segoe UI',sans-serif}
+html[dir=rtl] .sidebar{left:auto;right:0;border-right:0;border-left:1px solid var(--line)}
+html[dir=rtl] main{margin-left:0;margin-right:280px}
+html[dir=rtl] .nav,html[dir=rtl] .account-button,html[dir=rtl] .class-details h3,html[dir=rtl] .class-details p{text-align:start}
+html[dir=rtl] .nav b{margin-left:0;margin-right:auto}
+html[dir=rtl] .account-button>span:last-child{margin-left:0;margin-right:auto}
+html[dir=rtl] .class-time strong{direction:ltr;unicode-bidi:isolate;text-align:right}
+html[dir=rtl] .brand{letter-spacing:0}
+html[dir=rtl] .eyebrow,html[dir=rtl] .brand small{letter-spacing:0}
+html[dir=rtl] input[type=tel],html[dir=rtl] input[name=password]{text-align:right}
+html[dir=rtl] .rule-summary,html[dir=rtl] .job-card p,html[dir=rtl] .rule-card p,html[dir=rtl] .week-picker h2{unicode-bidi:plaintext}
+html[dir=rtl] .skip-link{left:auto;right:16px}
+html[dir=rtl] .offline-page{margin:10vh auto}
+@media(max-width:1000px){html[dir=rtl] main{margin:0}html[dir=rtl] .sidebar{border-left:0}html[dir=rtl] .nav b{margin-right:4px}html[dir=rtl] .day small{font-size:.8rem}}
+.booking-explanation p{font-size:1rem;line-height:1.65}
